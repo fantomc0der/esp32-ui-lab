@@ -666,6 +666,14 @@ void jsvm_repl_line(const char *src) {
   JS_FreeValue(g_ctx, r);
 }
 
+void jsvm_pump() {
+  if (!g_rt) return;
+  JSContext *jctx;
+  int r;
+  while ((r = JS_ExecutePendingJob(g_rt, &jctx)) > 0) {}
+  if (r < 0) js_report_exception();
+}
+
 void jsvm_stop() {
   if (!g_rt) return;
 

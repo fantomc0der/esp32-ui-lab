@@ -224,10 +224,25 @@ static void pollSerialRepl() {
   static String line;
   static String upload;
   static bool uploading = false;
+  // Caps so a hostile/broken sender can't grow these Strings until the
+  // internal heap dies: REPL lines beyond 4 KB are discarded, uploads beyond
+  // 256 KB abort the transfer.
+  constexpr size_t kMaxLine = 4 * 1024;
+  constexpr size_t kMaxUpload = 256 * 1024;
   while (Serial.available()) {
     const char ch = static_cast<char>(Serial.read());
     if (ch == '\r') continue;
-    if (ch != '\n') { line += ch; continue; }
+    if (ch != '\n') {
+      if (line.length() < kMaxLine) line += ch;
+      continue;
+    }
+    if (uploading && upload.length() + line.length() > kMaxUpload) {
+      uploading = false;
+      upload = "";
+      Serial.println("[app] upload aborted: exceeds 256 KB cap");
+      line = "";
+      continue;
+    }
 
     if (uploading) {
       if (line == "app-end") {
@@ -299,5 +314,6 @@ void loop() {
   }
 
   pollSerialRepl();
+  jsvm_pump();  // promise reactions / async continuations
   delay(idle_ms);
 }

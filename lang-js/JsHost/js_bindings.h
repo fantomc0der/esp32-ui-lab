@@ -28,6 +28,11 @@ bool jsvm_running();
 // the exception) to Serial. No-op when the VM is down.
 void jsvm_repl_line(const char *src);
 
+// Runs QuickJS's pending-job queue (promise reactions, async/await
+// continuations). quickjs-libc's event loop normally does this; without our
+// own pump, a .then() callback would never fire. Call once per loop().
+void jsvm_pump();
+
 // Provided by the host .ino:
 uint32_t jsvm_host_fps();
 void jsvm_host_backlight(uint8_t percent);

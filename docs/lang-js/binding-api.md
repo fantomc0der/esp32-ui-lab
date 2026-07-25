@@ -6,6 +6,8 @@ The JavaScript surface exposed by `lang-js/JsHost/js_bindings.cpp`. Deliberately
 
 Four objects exist in every script: `lv`, `sys`, `wifi`, `console`. There is no module system, no `import`, no filesystem access from JS. One script file is the whole app.
 
+The full modern language is available (closures, template literals, BigInt, JSON, `Promise`, `async`/`await` — the host pumps QuickJS's job queue every loop, so promise reactions actually run). There is no `setTimeout`; use `lv.timer`.
+
 ## lv — widgets
 
 | Call | Notes |

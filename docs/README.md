@@ -25,5 +25,6 @@ Organized to mirror the repo's per-language `lang-*/` directories (see the [top-
 |---|---|
 | [lang-js/js-scripting-plan.md](lang-js/js-scripting-plan.md) | The phased plan for running QuickJS + LVGL bindings on this board, with feasibility budget and risks — all phases now done and hardware-verified |
 | [lang-js/binding-api.md](lang-js/binding-api.md) | The JavaScript API exposed to app.js (lv/sys/wifi/console), props reference, and the GC ownership rules |
+| [lang-js/engine-notes.md](lang-js/engine-notes.md) | QuickJS-ng on this board: spike measurements, the heap-poisoning/usable_size trap, the job pump, the Xtensa type patches, the DTR/RTS bootloader trap |
 
 Start with the [`lang-c/` README](../lang-c/README.md) for setup + deployment of the working demo; come here for the deeper "how does this actually work" material.

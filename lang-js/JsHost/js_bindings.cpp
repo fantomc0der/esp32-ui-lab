@@ -34,7 +34,7 @@ static const size_t kJsMaxStack = 20 * 1024;  // loopTask stack is 32 KB
 // JS heap in PSRAM. usable_size must report 0: QuickJS treats it as writable
 // capacity, and with IDF heap poisoning heap_caps_get_allocated_size() counts
 // the tail canary in it — reporting real sizes corrupts the heap (proven on
-// hardware, see JsSpike/README.md).
+// hardware, see docs/lang-js/engine-notes.md).
 static void *qjs_calloc(void *, size_t n, size_t sz) { return heap_caps_calloc(n, sz, MALLOC_CAP_SPIRAM); }
 static void *qjs_malloc(void *, size_t sz) { return heap_caps_malloc(sz, MALLOC_CAP_SPIRAM); }
 static void qjs_free(void *, void *p) { heap_caps_free(p); }

@@ -1,11 +1,10 @@
 # flash.ps1 - build + upload a lang-js sketch from the command line.
 #
 # Same idea as lang-c/flash.ps1, with two differences: the sketch is selectable
-# (JsHost by default, -Sketch JsSpike for the Phase 1 spike) and every build
-# links the shared vendored engine via --library quickjs-ng.
+# (-Sketch, JsHost by default) and every build links the shared vendored engine
+# via --library quickjs-ng.
 #
 #   .\flash.ps1                    # build JsHost, upload, monitor
-#   .\flash.ps1 -Sketch JsSpike    # the Phase 1 spike instead
 #   .\flash.ps1 -Port COM7         # force a port
 #   .\flash.ps1 -BuildOnly         # compile only
 #   .\flash.ps1 -Monitor           # just open the serial monitor

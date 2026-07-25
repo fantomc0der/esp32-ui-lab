@@ -11,9 +11,9 @@ Five one-line type fixes in `quickjs.c` where an `int` local is passed to a func
 This folder is not installed into the Arduino libraries directory; pass it explicitly:
 
 ```powershell
-arduino-cli compile --library .\quickjs-ng -b <FQBN> .\JsSpike
+arduino-cli compile --library .\quickjs-ng -b <FQBN> .\JsHost
 ```
 
 Two build requirements, both supplied by each sketch's `build_opt.h` (the esp32 core picks that file up automatically and applies its flags to library sources too): `-D_GNU_SOURCE` (upstream's CMake adds it) and `-DNDEBUG` (strips QuickJS's debug dump machinery, worth ~90 KB of flash).
 
-Allocator rule for every consumer: report `js_malloc_usable_size` as 0. QuickJS treats the reported value as writable capacity, and with IDF heap poisoning enabled `heap_caps_get_allocated_size()` counts the tail canary in it, so reporting real sizes corrupts the heap (found the hard way on hardware; see `../JsSpike/README.md`).
+Allocator rule for every consumer: report `js_malloc_usable_size` as 0. QuickJS treats the reported value as writable capacity, and with IDF heap poisoning enabled `heap_caps_get_allocated_size()` counts the tail canary in it, so reporting real sizes corrupts the heap (found the hard way on hardware; see [`docs/lang-js/engine-notes.md`](../../docs/lang-js/engine-notes.md)).

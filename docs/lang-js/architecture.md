@@ -126,13 +126,13 @@ Every trampoline therefore dups what it passes in, calls, then frees. `wifi_poll
 
 The intrusive lists (`g_events`, `g_timers`) exist because the DELETE hook does not cover everything. `lv_obj_clean(screen)` deletes the screen's *children*, so a binding attached to the screen object itself never receives `LV_EVENT_DELETE`. The lists let teardown find those stragglers.
 
-### Known hazard: dangling widget handles
+### Stale widget handles
 
-Because wrappers are weak and unvalidated, a handle whose widget has been deleted still points at freed memory. Within a single script run there is exactly one way to reach that state: `.clean()` deletes children, so holding a handle to a child across a `.clean()` of its parent leaves that handle dangling, and using it afterward is undefined behavior. Across a reload the question does not arise, since teardown destroys the context holding every handle.
+Because wrappers are weak, a handle whose widget has been deleted points at freed memory. `.clean()` deletes children, so holding a handle to a child across a `.clean()` of its container reaches that state within a single script run. (Across a reload the question does not arise, since teardown destroys the context holding every handle.)
 
-Current code stays clear of this. The one `.clean()` call in `app.js` is `wifiList.clean()`, and list rows are created transiently inside the scan callback, never retained. The hazard is a sharp edge waiting for a future script rather than a live bug.
+Left unchecked this had the worst failure mode available: writing through a stale handle **silently succeeded**, corrupting the heap with no crash and no error, confirmed on hardware. So `arg_widget()`, which every binding call goes through to unwrap its subject, now validates with `lv_obj_is_valid()` and throws a JS `TypeError: widget has been deleted` instead. Scripts can catch that; freed memory they cannot.
 
-The fix, if it becomes worth the cost: LVGL 9.5 provides `lv_obj_is_valid()` (`lv_obj.h:351`), so `arg_widget()` could validate before returning and throw a clean JS `TypeError` instead. That converts a memory-corruption bug into an exception, at the cost of a tree walk on every binding call.
+The check is affordable because of what `lv_obj_is_valid()` does: it walks the screen tree comparing pointers and never dereferences the candidate, which is both why it is safe on an already-freed pointer and why it costs only a few hundred comparisons on a UI this size. Measured frame rate is unchanged.
 
 ## Teardown, and why the order is what it is
 

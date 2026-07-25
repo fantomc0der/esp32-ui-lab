@@ -15,9 +15,9 @@
 //     whatever the DELETE hooks didn't reach (bindings on the screen object,
 //     which lv_obj_clean() does not delete) before freeing the context.
 //   * Widget wrappers hold a bare lv_obj_t* and no finalizer: LVGL owns the
-//     widget tree, so a wrapper is a weak reference. A handle kept across a
-//     .clean() of its parent dangles; see the hazard note in
-//     docs/lang-js/architecture.md.
+//     widget tree, so a wrapper is a weak reference. arg_widget() validates
+//     every handle before use, so a wrapper left stale by a .clean() raises a
+//     JS TypeError instead of writing into freed memory.
 
 #include "js_bindings.h"
 
@@ -206,8 +206,21 @@ static void wifi_poll_timer(lv_timer_t *) {
 
 // ---------------------------------------------------------------- helpers
 
+// Widget wrappers are weak references: LVGL owns the tree, so a handle kept
+// across a .clean() of its container points at freed memory. Writing through
+// one used to silently succeed and corrupt the heap (verified on hardware),
+// which is the worst failure mode available, so validate on every use.
+// lv_obj_is_valid() only compares pointers while walking the screen tree and
+// never dereferences the candidate, making it safe on an already-freed
+// pointer, and it is cheap at the object counts a 320x172 UI holds.
 static lv_obj_t *arg_widget(JSContext *ctx, JSValueConst v) {
-  return static_cast<lv_obj_t *>(JS_GetOpaque2(ctx, v, g_widget_class));
+  lv_obj_t *obj = static_cast<lv_obj_t *>(JS_GetOpaque2(ctx, v, g_widget_class));
+  if (obj == nullptr) return nullptr;  // JS_GetOpaque2 already threw
+  if (!lv_obj_is_valid(obj)) {
+    JS_ThrowTypeError(ctx, "widget has been deleted");
+    return nullptr;
+  }
+  return obj;
 }
 
 static JSValue wrap_widget(JSContext *ctx, lv_obj_t *obj) {

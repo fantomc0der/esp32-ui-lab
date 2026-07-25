@@ -10,7 +10,7 @@ The classic Arduino approach: everything compiled into one firmware image. Conta
 
 ### [`lang-js/`](lang-js/README.md) — the JavaScript way ✅ working
 
-UI logic written in JavaScript, executed by a QuickJS-ng engine embedded in the firmware — the idea behind [lvgljs](https://lvgl.io/docs/open/integration/bindings/javascript), re-derived for a FreeRTOS microcontroller (lvgljs itself targets embedded Linux). The **JsHost** firmware loads `app.js` from the SD card (or the flash FATFS partition), and a long-press of BOOT hot-reloads it — no recompile, no reflash. Serial doubles as a live JS REPL. Plan and measurements: [`docs/lang-js/js-scripting-plan.md`](docs/lang-js/js-scripting-plan.md); script API: [`docs/lang-js/binding-api.md`](docs/lang-js/binding-api.md).
+UI logic written in JavaScript, executed by a QuickJS-ng engine embedded in the firmware — the idea behind [lvgljs](https://lvgl.io/docs/open/integration/bindings/javascript), re-derived for a FreeRTOS microcontroller (lvgljs itself targets embedded Linux). The **JsHost** firmware loads `app.js` from the SD card (or the flash FATFS partition), and a long-press of BOOT hot-reloads it — no recompile, no reflash. Serial doubles as a live JS REPL. Why it exists and what it cost: [`docs/lang-js/design-rationale.md`](docs/lang-js/design-rationale.md); script API: [`docs/lang-js/binding-api.md`](docs/lang-js/binding-api.md).
 
 ## Docs
 

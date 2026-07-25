@@ -1,6 +1,6 @@
 # JsHost architecture
 
-How the JavaScript runtime actually works, for someone modifying it. If you only want to *write* scripts, [`binding-api.md`](binding-api.md) is the reference you want; this document is the layer beneath it. The design rationale and the alternatives that were rejected live in [`js-scripting-plan.md`](js-scripting-plan.md), and engine-level measurements and traps are in [`engine-notes.md`](engine-notes.md).
+How the JavaScript runtime actually works, for someone modifying it. If you only want to *write* scripts, [`binding-api.md`](binding-api.md) is the reference you want; this document is the layer beneath it. The design rationale and the alternatives that were rejected live in [`design-rationale.md`](design-rationale.md), and engine-level measurements and traps are in [`engine-notes.md`](engine-notes.md).
 
 ## The stack
 

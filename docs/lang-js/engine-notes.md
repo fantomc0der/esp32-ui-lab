@@ -14,7 +14,7 @@ Measured with a serial-only spike sketch (engine + REPL, no display; it lived at
 | PSRAM at runtime | 79,672 bytes for runtime + context; a 20k-object churn peaked at ~3.26 MB, fully reclaimed by `JS_RunGC` |
 | Eval times | `1+1` 1.1 ms; closures 2.8 ms; JSON round-trip 2.9 ms; 20k-object alloc loop 1.31 s; 1000-element reduce 10.6 ms |
 
-The Phase 1 exit criteria from the [plan](js-scripting-plan.md) (eval on hardware, < 1 MB flash, heap demonstrably in PSRAM) were all met with room to spare, which is why there is no JerryScript fallback in this repo.
+The pre-committed exit criteria (eval on hardware, < 1 MB flash, heap demonstrably in PSRAM) were all met with room to spare, which is why there is no JerryScript fallback in this repo. Why the spike existed at all: [`design-rationale.md`](design-rationale.md).
 
 ## Trap 1: `js_malloc_usable_size` must report 0
 

@@ -2,7 +2,7 @@
 
 Goal: write UI logic for this board in JavaScript, edited without recompiling firmware — the *idea* of [lvgljs](https://lvgl.io/docs/open/integration/bindings/javascript), re-derived for a FreeRTOS MCU instead of embedded Linux.
 
-**Status: Phase 1 complete and hardware-verified (2026-07-25).** QuickJS-ng v0.15.1 runs on the board: 429 KB flash, 348 bytes internal RAM at runtime, JS heap in PSRAM, `1+1` in 1.1 ms. Measurements and the two traps found (heap-poisoning vs `usable_size`, DTR/RTS bootloader trap) are recorded in [`lang-js/JsSpike/README.md`](../../lang-js/JsSpike/README.md). Later phases below are unchanged.
+**Status: all five phases complete and hardware-verified (2026-07-25).** QuickJS-ng v0.15.1 runs on the board (429 KB flash for the engine, JS heap in PSRAM — measurements in [`lang-js/JsSpike/README.md`](../../lang-js/JsSpike/README.md)); the runtime firmware is [`lang-js/JsHost/`](../../lang-js/JsHost/README.md) with the binding surface documented in [`binding-api.md`](binding-api.md); the shipped app is [`lang-js/app/app.js`](../../lang-js/app/app.js). Verified end-to-end: fallback screen, ffat:/app.js loading, live REPL over serial, serial script upload (`app-begin`/`app-end`), async wifi.scan callback, and 5x hot-reload stress with no internal-RAM leak. The sections below are the original plan, kept as the design rationale.
 
 ## Cold-start context (read first)
 

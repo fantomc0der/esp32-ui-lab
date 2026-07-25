@@ -8,9 +8,9 @@ Projects for the **Waveshare ESP32-S3-Touch-LCD-1.47** (ESP32-S3R8, 1.47" IPS 17
 
 The classic Arduino approach: everything compiled into one firmware image. Contains **WaveshareVitals**, a 4-tab LVGL 9 demo dashboard (heap chart, touch tester, WiFi scanner, system panel) — fully verified on hardware. Start at [`lang-c/README.md`](lang-c/README.md) for setup, board settings, and deployment; `lang-c/flash.ps1` builds and flashes from the terminal.
 
-### [`lang-js/`](lang-js/README.md) — the JavaScript way 🚧 planned
+### [`lang-js/`](lang-js/README.md) — the JavaScript way ✅ working
 
-UI logic written in JavaScript, executed by a QuickJS engine embedded in the firmware — the idea behind [lvgljs](https://lvgl.io/docs/open/integration/bindings/javascript), re-derived for a FreeRTOS microcontroller (lvgljs itself targets embedded Linux). Edit `app.js` on your PC, load it from the SD card, no recompile. The plan lives at [`docs/lang-js/js-scripting-plan.md`](docs/lang-js/js-scripting-plan.md).
+UI logic written in JavaScript, executed by a QuickJS-ng engine embedded in the firmware — the idea behind [lvgljs](https://lvgl.io/docs/open/integration/bindings/javascript), re-derived for a FreeRTOS microcontroller (lvgljs itself targets embedded Linux). The **JsHost** firmware loads `app.js` from the SD card (or the flash FATFS partition), and a long-press of BOOT hot-reloads it — no recompile, no reflash. Serial doubles as a live JS REPL. Plan and measurements: [`docs/lang-js/js-scripting-plan.md`](docs/lang-js/js-scripting-plan.md); script API: [`docs/lang-js/binding-api.md`](docs/lang-js/binding-api.md).
 
 ## Docs
 

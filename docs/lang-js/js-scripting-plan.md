@@ -2,7 +2,7 @@
 
 Goal: write UI logic for this board in JavaScript, edited without recompiling firmware — the *idea* of [lvgljs](https://lvgl.io/docs/open/integration/bindings/javascript), re-derived for a FreeRTOS MCU instead of embedded Linux.
 
-**Status: not started.** This document is written to be executable from a cold start — a fresh session (or person) should be able to begin Phase 1 with no context beyond this repo.
+**Status: Phase 1 complete and hardware-verified (2026-07-25).** QuickJS-ng v0.15.1 runs on the board: 429 KB flash, 348 bytes internal RAM at runtime, JS heap in PSRAM, `1+1` in 1.1 ms. Measurements and the two traps found (heap-poisoning vs `usable_size`, DTR/RTS bootloader trap) are recorded in [`lang-js/JsSpike/README.md`](../../lang-js/JsSpike/README.md). Later phases below are unchanged.
 
 ## Cold-start context (read first)
 

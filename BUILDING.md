@@ -1,6 +1,6 @@
 # Building & deploying
 
-Everything here targets the **Waveshare ESP32-S3-Touch-LCD-1.47** over its native USB-C port using [arduino-cli](https://arduino.github.io/arduino-cli/) (the Arduino IDE works too — each sketch folder opens directly). This page covers what's common to every project in the repo; each `lang-*/` way has its own detailed doc, linked below.
+Everything here targets the **Waveshare ESP32-S3-Touch-LCD-1.47** over its native USB-C port using [arduino-cli](https://arduino.github.io/arduino-cli/) (the Arduino IDE works too — each sketch folder opens directly). This page covers what's common to every project in the repo; each `lang-*/` directory has its own detailed doc, linked below.
 
 ## One-time setup
 
@@ -25,9 +25,9 @@ The two you must never change: `PSRAM=opi` (the S3**R8** has octal PSRAM; anythi
 
 ## Building and flashing
 
-Each way ships a `flash.ps1` that encodes the FQBN, finds the port, compiles, uploads, and opens a monitor. Shared flags: `-BuildOnly`, `-Port COMx`, `-Monitor`.
+Both directories ship a `flash.ps1` that encodes the FQBN, finds the port, compiles, uploads, and opens a monitor. Shared flags: `-BuildOnly`, `-Port COMx`, `-Monitor`.
 
-### The C way — [`lang-c/`](lang-c/README.md)
+### C/C++ — [`lang-c/`](lang-c/README.md)
 
 ```powershell
 cd lang-c; .\flash.ps1
@@ -35,13 +35,13 @@ cd lang-c; .\flash.ps1
 
 One firmware image containing the whole demo; changing the UI means recompiling and reflashing. Details (manual CLI commands, expected boot log, scripted serial capture): [`docs/lang-c/build-and-flash.md`](docs/lang-c/build-and-flash.md).
 
-### The JS way — [`lang-js/`](lang-js/README.md)
+### JavaScript — [`lang-js/`](lang-js/README.md)
 
 ```powershell
 cd lang-js; .\flash.ps1
 ```
 
-Flash the JsHost runtime once; after that the UI is an `app.js` file you deploy as data — SD card + BOOT long-press, or pasted over serial — with no recompile. Builds differ from the C way only in linking two libraries that sit beside the sketch (the JS engine and the LVGL bindings) with `--library`. Details (manual CLI, deploying app.js, the serial REPL and upload protocol, expected boot log): [`docs/lang-js/build-and-deploy.md`](docs/lang-js/build-and-deploy.md).
+Flash the JsHost runtime once; after that the UI is an `app.js` file you deploy as data — SD card + BOOT long-press, or pasted over serial — with no recompile. Builds differ from the C sketch only in linking two libraries that sit beside it (the JS engine and the LVGL bindings) with `--library`. Details (manual CLI, deploying app.js, the serial REPL and upload protocol, expected boot log): [`docs/lang-js/build-and-deploy.md`](docs/lang-js/build-and-deploy.md).
 
 ## If something misbehaves
 

@@ -1,4 +1,4 @@
-# The JavaScript way
+# JavaScript-scripted UI
 
 UI logic for the Waveshare ESP32-S3-Touch-LCD-1.47 written in **JavaScript**, running on a QuickJS-ng engine embedded in the firmware. How it works internally: [`docs/lang-js/architecture.md`](../docs/lang-js/architecture.md). What scripts can call: [`docs/lang-js/binding-api.md`](../docs/lang-js/binding-api.md). Why it was built this way, with measurements: [`docs/lang-js/design-rationale.md`](../docs/lang-js/design-rationale.md).
 

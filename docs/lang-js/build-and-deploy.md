@@ -1,6 +1,6 @@
-# Build & deploy — the JavaScript way
+# Build & deploy — JavaScript
 
-The JS-specific half of [`BUILDING.md`](../../BUILDING.md): building the JsHost firmware and getting `app.js` onto the board. Toolchain setup, the FQBN, and general USB/serial troubleshooting are shared with the C way — see [`BUILDING.md`](../../BUILDING.md) and [`lang-c/build-and-flash.md`](../lang-c/build-and-flash.md).
+The JS-specific half of [`BUILDING.md`](../../BUILDING.md): building the JsHost firmware and getting `app.js` onto the board. Toolchain setup, the FQBN, and general USB/serial troubleshooting are shared with the C sketch — see [`BUILDING.md`](../../BUILDING.md) and [`lang-c/build-and-flash.md`](../lang-c/build-and-flash.md).
 
 ## Building JsHost
 

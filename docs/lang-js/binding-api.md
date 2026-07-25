@@ -30,7 +30,9 @@ Accepted at creation and via `.set(props)`. Unknown keys are ignored (scripts sh
 
 | Key | Value |
 |---|---|
-| `w`, `h` | pixels, or `"content"` for size-to-content |
+| `w`, `h` | pixels (`120`), a percentage of the parent's content area (`"50%"`), or `"content"` to shrink-wrap children |
+| `flex` | `"row"`, `"column"`, `"row-wrap"`, `"column-wrap"` — children position themselves instead of being placed by hand |
+| `flexAlign` | `"center"`, or `["main", "cross"]`; each of `start`, `end`, `center`, `between`, `around`, `evenly` |
 | `align` | `center`, `top-left`, `top-mid`, `top-right`, `left-mid`, `right-mid`, `bottom-left`, `bottom-mid`, `bottom-right`; `x`/`y` become offsets from it |
 | `x`, `y` | offsets with `align`, absolute position without |
 | `text` | labels and buttons |
@@ -47,6 +49,18 @@ Accepted at creation and via `.set(props)`. Unknown keys are ignored (scripts sh
 | `points`, `divs` | chart only: point count, `[hDiv, vDiv]` grid lines |
 | `seriesColor` | chart only, **at creation only**: the line color. Ignored by `.set()`, since the series is created with the widget. |
 | `bar` | tabview only: tab-bar height in pixels |
+
+### Writing for more than one screen
+
+Pixel coordinates are the quickest way to lay out a UI you only ever run on one panel, and that is what [`app/app.js`](../../lang-js/app/app.js) does. To make a script survive a different resolution, size with percentages and let `flex` place the children:
+
+```js
+const bar = lv.obj(lv.screen(), { w: "100%", h: "20%", flex: "row", flexAlign: ["evenly", "center"] });
+lv.label(bar, { text: "left" });
+lv.label(bar, { text: "right" });
+```
+
+Fonts do not scale: the three sizes are fixed bitmaps compiled into the firmware, so text stays the same pixel height on a larger display.
 
 ### Widget methods
 

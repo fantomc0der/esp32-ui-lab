@@ -248,6 +248,44 @@ static bool parse_color(JSContext *ctx, JSValueConst v, lv_color_t *out) {
   return false;
 }
 
+// Sizes accept a number of pixels, "50%" of the parent's content area, or
+// "content" to shrink-wrap children. Percentages are what let a script lay
+// out for any resolution instead of one panel's pixel count.
+static int32_t parse_size(JSContext *ctx, JSValueConst v) {
+  if (JS_IsString(v)) {
+    const char *s = JS_ToCString(ctx, v);
+    if (!s) return LV_SIZE_CONTENT;
+    int32_t size;
+    const size_t len = strlen(s);
+    if (len && s[len - 1] == '%') {
+      size = LV_PCT(static_cast<int32_t>(strtol(s, nullptr, 10)));
+    } else {
+      size = LV_SIZE_CONTENT;  // "content", and anything else we don't know
+    }
+    JS_FreeCString(ctx, s);
+    return size;
+  }
+  int32_t n = 0;
+  JS_ToInt32(ctx, &n, v);
+  return n;
+}
+
+static const struct { const char *name; lv_flex_flow_t code; } kFlexFlows[] = {
+    {"row", LV_FLEX_FLOW_ROW},
+    {"column", LV_FLEX_FLOW_COLUMN},
+    {"row-wrap", LV_FLEX_FLOW_ROW_WRAP},
+    {"column-wrap", LV_FLEX_FLOW_COLUMN_WRAP},
+};
+
+static const struct { const char *name; lv_flex_align_t code; } kFlexAligns[] = {
+    {"start", LV_FLEX_ALIGN_START},
+    {"end", LV_FLEX_ALIGN_END},
+    {"center", LV_FLEX_ALIGN_CENTER},
+    {"between", LV_FLEX_ALIGN_SPACE_BETWEEN},
+    {"around", LV_FLEX_ALIGN_SPACE_AROUND},
+    {"evenly", LV_FLEX_ALIGN_SPACE_EVENLY},
+};
+
 static const struct { const char *name; lv_align_t code; } kAligns[] = {
     {"center", LV_ALIGN_CENTER},
     {"top-left", LV_ALIGN_TOP_LEFT},
@@ -312,17 +350,11 @@ static void apply_props(JSContext *ctx, lv_obj_t *obj, JSValueConst props) {
   auto has = [&](JSValueConst val) { return !JS_IsUndefined(val) && !JS_IsNull(val); };
 
   v = get("w");
-  if (has(v)) {
-    if (JS_IsString(v)) lv_obj_set_width(obj, LV_SIZE_CONTENT);
-    else { JS_ToInt32(ctx, &n, v); lv_obj_set_width(obj, n); }
-  }
+  if (has(v)) lv_obj_set_width(obj, parse_size(ctx, v));
   JS_FreeValue(ctx, v);
 
   v = get("h");
-  if (has(v)) {
-    if (JS_IsString(v)) lv_obj_set_height(obj, LV_SIZE_CONTENT);
-    else { JS_ToInt32(ctx, &n, v); lv_obj_set_height(obj, n); }
-  }
+  if (has(v)) lv_obj_set_height(obj, parse_size(ctx, v));
   JS_FreeValue(ctx, v);
 
   // align + x/y offsets are applied together; bare x/y = absolute position.
@@ -410,6 +442,40 @@ static void apply_props(JSContext *ctx, lv_obj_t *obj, JSValueConst props) {
   if (has(v)) {
     if (JS_ToBool(ctx, v)) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+  }
+  JS_FreeValue(ctx, v);
+
+  // flex: children lay themselves out, so the parent adapts to any resolution
+  // instead of the script hardcoding each child's position.
+  v = get("flex");
+  if (has(v)) {
+    const char *s = JS_ToCString(ctx, v);
+    if (s) {
+      for (auto &f : kFlexFlows) {
+        if (strcmp(s, f.name) == 0) { lv_obj_set_flex_flow(obj, f.code); break; }
+      }
+      JS_FreeCString(ctx, s);
+    }
+  }
+  JS_FreeValue(ctx, v);
+
+  // flexAlign: "main" or ["main", "cross"] — track alignment follows cross.
+  v = get("flexAlign");
+  if (has(v)) {
+    lv_flex_align_t place[2] = {LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START};
+    for (int i = 0; i < 2; i++) {
+      JSValue item = JS_IsString(v) ? (i == 0 ? JS_DupValue(ctx, v) : JS_UNDEFINED)
+                                    : JS_GetPropertyUint32(ctx, v, i);
+      const char *s = JS_IsString(item) ? JS_ToCString(ctx, item) : nullptr;
+      if (s) {
+        for (auto &a : kFlexAligns) {
+          if (strcmp(s, a.name) == 0) { place[i] = a.code; break; }
+        }
+        JS_FreeCString(ctx, s);
+      }
+      JS_FreeValue(ctx, item);
+    }
+    lv_obj_set_flex_align(obj, place[0], place[1], place[1]);
   }
   JS_FreeValue(ctx, v);
 

@@ -4,14 +4,14 @@ Topic notes for this repo — written so future-you (or a future session) can re
 
 Organized to mirror the repo's per-language `lang-*/` directories (see the [top-level README](../README.md)).
 
-## Shared (applies to every way)
+## Shared (applies to both)
 
 | Doc | What's in it |
 |---|---|
-| [architecture.md](architecture.md) | How the repo fits together: the stack both ways share, where they diverge, the single-task rule, and the constraints that shaped everything |
+| [architecture.md](architecture.md) | How the repo fits together: the stack C and JavaScript share, where they diverge, the single-task rule, and the constraints that shaped everything |
 | [hardware.md](hardware.md) | The board itself: pinout, chip quirks, what the microSD slot is for, traps specific to this exact Waveshare variant |
 
-## `lang-c/` — the C/C++ way
+## `lang-c/` — C/C++
 
 | Doc | What's in it |
 |---|---|
@@ -20,7 +20,7 @@ Organized to mirror the repo's per-language `lang-*/` directories (see the [top-
 | [lang-c/portability.md](lang-c/portability.md) | Which code is specific to this device vs. reusable elsewhere, file by file |
 | [lang-c/build-and-flash.md](lang-c/build-and-flash.md) | Arduino board settings, the FQBN, flashing from the CLI, scripted serial capture on Windows |
 
-## `lang-js/` — the JavaScript way
+## `lang-js/` — JavaScript
 
 | Doc | What's in it |
 |---|---|
@@ -28,6 +28,7 @@ Organized to mirror the repo's per-language `lang-*/` directories (see the [top-
 | [lang-js/design-rationale.md](lang-js/design-rationale.md) | Why this exists rather than lvgljs, what was kept from it, estimated vs actual cost, and how each predicted risk turned out |
 | [lang-js/build-and-deploy.md](lang-js/build-and-deploy.md) | Building JsHost (the --library flag), deploying app.js via SD card or serial, the REPL/upload serial commands, expected boot log |
 | [lang-js/binding-api.md](lang-js/binding-api.md) | The JavaScript API exposed to app.js (lv/sys/wifi/console), props reference, and the GC ownership rules |
+| [lang-js/portability.md](lang-js/portability.md) | What the runtime actually requires (PSRAM, flash, LVGL 9), which ESP32 variants qualify, why screen size is not a constraint, and the three-hook porting contract |
 | [lang-js/engine-notes.md](lang-js/engine-notes.md) | QuickJS-ng on this board: spike measurements, the heap-poisoning/usable_size trap, the job pump, the Xtensa type patches, the DTR/RTS bootloader trap |
 
 Start with [`BUILDING.md`](../BUILDING.md) at the repo root for setup + deployment of either demo; come here for the deeper "how does this actually work" material.

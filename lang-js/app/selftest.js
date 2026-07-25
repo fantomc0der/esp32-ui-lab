@@ -73,6 +73,41 @@ check("bounds() reports geometry", () => {
   return b.w > 0 && b.h > 0 && typeof b.x === "number" && typeof b.y === "number";
 });
 
+// Resolution independence: a percentage must resolve against the parent's
+// content area, not be mistaken for "content" sizing.
+check("percentage width resolves against the parent", () => {
+  const outer = lv.obj(scr, { w: 100, h: 40, pad: 0, border: 0, scroll: false });
+  const half = lv.obj(outer, { w: "50%", h: 10, pad: 0, border: 0 });
+  const got = half.bounds().w;
+  outer.clean();
+  return got > 40 && got < 60;  // ~50 of the parent's 100
+});
+
+check("flex row lays children out left to right", () => {
+  const bar = lv.obj(scr, { w: 120, h: 30, pad: 0, border: 0, scroll: false, flex: "row" });
+  const a = lv.label(bar, { text: "a" });
+  const b = lv.label(bar, { text: "b" });
+  const ax = a.bounds().x, bx = b.bounds().x;
+  bar.clean();
+  return bx > ax;
+});
+
+check("flex column stacks children downward", () => {
+  const col = lv.obj(scr, { w: 60, h: 60, pad: 0, border: 0, scroll: false, flex: "column" });
+  const a = lv.label(col, { text: "a" });
+  const b = lv.label(col, { text: "b" });
+  const ay = a.bounds().y, by = b.bounds().y;
+  col.clean();
+  return by > ay;
+});
+
+check("flexAlign accepts a pair", () => {
+  const box = lv.obj(scr, { w: 60, h: 30, flex: "row", flexAlign: ["center", "center"] });
+  lv.label(box, { text: "c" });
+  box.clean();
+  return true;
+});
+
 // ---------------------------------------------------------------- misuse is rejected
 check("push() rejects a non-chart", () => threw(() => panel.push(1)));
 check("addTab() rejects a non-tabview", () => threw(() => panel.addTab("x")));

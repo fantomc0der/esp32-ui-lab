@@ -20,6 +20,8 @@ The full modern language is available (closures, template literals, BigInt, JSON
 | `lv.switch(parent, props?)` | boolean `value` |
 | `lv.arc(parent, props?)` | `range`, `value` |
 | `lv.list(parent, props?)` | rows via `list.add(text)` |
+| `lv.chart(parent, props?)` | single-series line chart in shift mode, point dots hidden; feed it with `.push(n)` |
+| `lv.tabview(parent, props?)` | swipeable/tappable tabs; `bar` prop sets tab-bar height, `.addTab(name)` returns the tab's content container |
 | `lv.timer(ms, fn)` | LVGL timer; returns a handle with `.stop()`; 10 ms floor |
 
 ### Props
@@ -34,18 +36,27 @@ Accepted at creation and via `.set(props)`. Unknown keys are ignored (scripts sh
 | `text` | labels and buttons |
 | `bg`, `color` | background / text color: `"#RRGGBB"` string or `0xRRGGBB` number |
 | `font` | `14`, `16`, or `20` (the three compiled-in montserrat sizes) |
-| `range` | `[min, max]` for slider/arc |
+| `range` | `[min, max]` for slider/arc, Y axis for chart |
 | `value` | number for slider/arc, boolean for switch |
 | `pad`, `radius` | style shorthands, pixels |
+| `border`, `borderColor` | border width (pixels) and color |
 | `scroll` | `false` removes the scrollable flag |
+| `clickable` | boolean, adds/removes the clickable flag (plain `lv.obj` isn't clickable by default) |
 | `hidden` | boolean |
+| `rotation`, `angles`, `knob` | arc only: start rotation, `[bgStart, bgEnd]` angles, and `knob: false` turns the arc into a pure indicator (no knob, not touchable) |
+| `points`, `divs`, `seriesColor` | chart only: point count, `[hDiv, vDiv]` grid lines, series color |
+| `bar` | tabview only: tab-bar height in pixels |
 
 ### Widget methods
 
 - `.set(props)` — apply props, returns the widget (chainable)
-- `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`; `fn(widget)` receives the widget handle; returns the widget
+- `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`, `"press"`; returns the widget. When a pointer drove the event the callback is `fn(widget, x, y)` with the touch point in screen coordinates; otherwise just `fn(widget)`
 - `.value()` / `.value(n)` — get/set for slider, arc, switch
 - `.add(text)` — lists only; returns the row's button handle
+- `.addTab(name)` — tabviews only; returns the tab's content container
+- `.push(n)` — charts only; appends to the series, shifting left when full
+- `.clean()` — deletes all children (their callbacks are released via the DELETE hooks)
+- `.bounds()` — `{ x, y, w, h }` of the content area in screen coordinates; combine with the `x, y` from a pointer event to place children under a finger
 
 ## sys
 

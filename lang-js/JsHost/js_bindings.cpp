@@ -89,7 +89,19 @@ static void event_unlink_and_free(EventBinding *b) {
 
 static void event_trampoline(lv_event_t *e) {
   EventBinding *b = static_cast<EventBinding *>(lv_event_get_user_data(e));
-  js_call_reporting(b->fn, 1, &b->widget);
+  // Pointer events carry the touch point: fn(widget, x, y). Non-pointer
+  // dispatches (e.g. a value change set from code) just get fn(widget).
+  lv_indev_t *indev = lv_indev_active();
+  if (indev) {
+    lv_point_t pt;
+    lv_indev_get_point(indev, &pt);
+    JSValue args[3] = {b->widget, JS_NewInt32(g_ctx, pt.x), JS_NewInt32(g_ctx, pt.y)};
+    js_call_reporting(b->fn, 3, args);
+    JS_FreeValue(g_ctx, args[1]);
+    JS_FreeValue(g_ctx, args[2]);
+  } else {
+    js_call_reporting(b->fn, 1, &b->widget);
+  }
 }
 
 static void event_delete_cb(lv_event_t *e) {
@@ -338,6 +350,8 @@ static void apply_props(JSContext *ctx, lv_obj_t *obj, JSValueConst props) {
     JS_FreeValue(ctx, lo); JS_FreeValue(ctx, hi);
     if (lv_obj_check_type(obj, &lv_slider_class)) lv_slider_set_range(obj, a, b);
     else if (lv_obj_check_type(obj, &lv_arc_class)) lv_arc_set_range(obj, a, b);
+    else if (lv_obj_check_type(obj, &lv_chart_class))
+      lv_chart_set_axis_range(obj, LV_CHART_AXIS_PRIMARY_Y, a, b);
   }
   JS_FreeValue(ctx, v);
 
@@ -363,6 +377,74 @@ static void apply_props(JSContext *ctx, lv_obj_t *obj, JSValueConst props) {
     else lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
   }
   JS_FreeValue(ctx, v);
+
+  v = get("border");
+  if (has(v)) { JS_ToInt32(ctx, &n, v); lv_obj_set_style_border_width(obj, n, 0); }
+  JS_FreeValue(ctx, v);
+
+  v = get("borderColor");
+  if (has(v)) {
+    lv_color_t c;
+    if (parse_color(ctx, v, &c)) lv_obj_set_style_border_color(obj, c, 0);
+  }
+  JS_FreeValue(ctx, v);
+
+  v = get("clickable");
+  if (has(v)) {
+    if (JS_ToBool(ctx, v)) lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    else lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+  }
+  JS_FreeValue(ctx, v);
+
+  // arc-only knobs
+  if (lv_obj_check_type(obj, &lv_arc_class)) {
+    v = get("rotation");
+    if (has(v)) { JS_ToInt32(ctx, &n, v); lv_arc_set_rotation(obj, n); }
+    JS_FreeValue(ctx, v);
+
+    v = get("angles");
+    if (has(v)) {
+      JSValue lo = JS_GetPropertyUint32(ctx, v, 0), hi = JS_GetPropertyUint32(ctx, v, 1);
+      int32_t a = 0, b = 360;
+      JS_ToInt32(ctx, &a, lo); JS_ToInt32(ctx, &b, hi);
+      JS_FreeValue(ctx, lo); JS_FreeValue(ctx, hi);
+      lv_arc_set_bg_angles(obj, a, b);
+    }
+    JS_FreeValue(ctx, v);
+
+    // knob:false turns the arc into a pure indicator (no knob, not touchable),
+    // like the C demo's load gauge.
+    v = get("knob");
+    if (has(v) && !JS_ToBool(ctx, v)) {
+      lv_obj_remove_style(obj, nullptr,
+                          static_cast<lv_style_selector_t>(LV_PART_KNOB) |
+                              static_cast<lv_style_selector_t>(LV_STATE_ANY));
+      lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    }
+    JS_FreeValue(ctx, v);
+  }
+
+  if (lv_obj_check_type(obj, &lv_chart_class)) {
+    v = get("points");
+    if (has(v)) { JS_ToInt32(ctx, &n, v); lv_chart_set_point_count(obj, n); }
+    JS_FreeValue(ctx, v);
+
+    v = get("divs");
+    if (has(v)) {
+      JSValue hv = JS_GetPropertyUint32(ctx, v, 0), vv = JS_GetPropertyUint32(ctx, v, 1);
+      int32_t a = 0, b = 0;
+      JS_ToInt32(ctx, &a, hv); JS_ToInt32(ctx, &b, vv);
+      JS_FreeValue(ctx, hv); JS_FreeValue(ctx, vv);
+      lv_chart_set_div_line_count(obj, a, b);
+    }
+    JS_FreeValue(ctx, v);
+  }
+
+  if (lv_obj_check_type(obj, &lv_tabview_class)) {
+    v = get("bar");
+    if (has(v)) { JS_ToInt32(ctx, &n, v); lv_tabview_set_tab_bar_size(obj, n); }
+    JS_FreeValue(ctx, v);
+  }
 }
 
 // ---------------------------------------------------------------- widget methods
@@ -378,6 +460,7 @@ static const struct { const char *name; lv_event_code_t code; } kEvents[] = {
     {"click", LV_EVENT_CLICKED},
     {"change", LV_EVENT_VALUE_CHANGED},
     {"pressing", LV_EVENT_PRESSING},
+    {"press", LV_EVENT_PRESSED},
 };
 
 static JSValue js_widget_on(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -394,7 +477,7 @@ static JSValue js_widget_on(JSContext *ctx, JSValueConst this_val, int argc, JSV
   }
   JS_FreeCString(ctx, name);
   if (code == LV_EVENT_ALL)
-    return JS_ThrowTypeError(ctx, "unknown event (use click/change/pressing)");
+    return JS_ThrowTypeError(ctx, "unknown event (use click/change/pressing/press)");
 
   EventBinding *b = static_cast<EventBinding *>(malloc(sizeof(EventBinding)));
   if (!b) return JS_ThrowOutOfMemory(ctx);
@@ -436,9 +519,61 @@ static JSValue js_widget_add(JSContext *ctx, JSValueConst this_val, int argc, JS
   return wrap_widget(ctx, btn);
 }
 
+// tabview.addTab(name) -> the tab's content container
+static JSValue js_widget_add_tab(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  lv_obj_t *obj = arg_widget(ctx, this_val);
+  if (!obj) return JS_EXCEPTION;
+  if (!lv_obj_check_type(obj, &lv_tabview_class))
+    return JS_ThrowTypeError(ctx, "addTab() only works on lv.tabview widgets");
+  if (argc < 1) return JS_ThrowTypeError(ctx, "addTab(name) needs a name");
+  const char *s = JS_ToCString(ctx, argv[0]);
+  if (!s) return JS_EXCEPTION;
+  lv_obj_t *tab = lv_tabview_add_tab(obj, s);
+  JS_FreeCString(ctx, s);
+  return wrap_widget(ctx, tab);
+}
+
+// chart.push(n) — append to the single series, shifting left when full
+static JSValue js_widget_push(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  lv_obj_t *obj = arg_widget(ctx, this_val);
+  if (!obj) return JS_EXCEPTION;
+  if (!lv_obj_check_type(obj, &lv_chart_class))
+    return JS_ThrowTypeError(ctx, "push() only works on lv.chart widgets");
+  int32_t n = 0;
+  if (argc >= 1) JS_ToInt32(ctx, &n, argv[0]);
+  lv_chart_series_t *ser = static_cast<lv_chart_series_t *>(lv_obj_get_user_data(obj));
+  if (ser) lv_chart_set_next_value(obj, ser, n);
+  return JS_DupValue(ctx, this_val);
+}
+
+// widget.clean() — delete all children (their event bindings are released by
+// the LV_EVENT_DELETE hooks)
+static JSValue js_widget_clean(JSContext *ctx, JSValueConst this_val, int, JSValueConst *) {
+  lv_obj_t *obj = arg_widget(ctx, this_val);
+  if (!obj) return JS_EXCEPTION;
+  lv_obj_clean(obj);
+  return JS_DupValue(ctx, this_val);
+}
+
+// widget.bounds() -> {x, y, w, h} of the content area in screen coordinates —
+// what you need to place children under a touch point.
+static JSValue js_widget_bounds(JSContext *ctx, JSValueConst this_val, int, JSValueConst *) {
+  lv_obj_t *obj = arg_widget(ctx, this_val);
+  if (!obj) return JS_EXCEPTION;
+  lv_obj_update_layout(obj);
+  lv_area_t a;
+  lv_obj_get_content_coords(obj, &a);
+  JSValue o = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, o, "x", JS_NewInt32(ctx, a.x1));
+  JS_SetPropertyStr(ctx, o, "y", JS_NewInt32(ctx, a.y1));
+  JS_SetPropertyStr(ctx, o, "w", JS_NewInt32(ctx, lv_area_get_width(&a)));
+  JS_SetPropertyStr(ctx, o, "h", JS_NewInt32(ctx, lv_area_get_height(&a)));
+  return o;
+}
+
 // ---------------------------------------------------------------- lv namespace
 
-enum WidgetKind { W_OBJ, W_BUTTON, W_LABEL, W_SLIDER, W_SWITCH, W_ARC, W_LIST };
+enum WidgetKind { W_OBJ, W_BUTTON, W_LABEL, W_SLIDER, W_SWITCH, W_ARC, W_LIST, W_CHART, W_TABVIEW };
 
 static JSValue js_lv_make(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv, int magic) {
   if (argc < 1) return JS_ThrowTypeError(ctx, "widget(parent, props?) needs a parent");
@@ -447,16 +582,34 @@ static JSValue js_lv_make(JSContext *ctx, JSValueConst, int argc, JSValueConst *
 
   lv_obj_t *obj = nullptr;
   switch (magic) {
-    case W_OBJ:    obj = lv_obj_create(parent); break;
-    case W_BUTTON: obj = lv_button_create(parent); break;
-    case W_LABEL:  obj = lv_label_create(parent); break;
-    case W_SLIDER: obj = lv_slider_create(parent); break;
-    case W_SWITCH: obj = lv_switch_create(parent); break;
-    case W_ARC:    obj = lv_arc_create(parent); break;
-    case W_LIST:   obj = lv_list_create(parent); break;
+    case W_OBJ:     obj = lv_obj_create(parent); break;
+    case W_BUTTON:  obj = lv_button_create(parent); break;
+    case W_LABEL:   obj = lv_label_create(parent); break;
+    case W_SLIDER:  obj = lv_slider_create(parent); break;
+    case W_SWITCH:  obj = lv_switch_create(parent); break;
+    case W_ARC:     obj = lv_arc_create(parent); break;
+    case W_LIST:    obj = lv_list_create(parent); break;
+    case W_CHART:   obj = lv_chart_create(parent); break;
+    case W_TABVIEW: obj = lv_tabview_create(parent); break;
   }
   if (!obj) return JS_ThrowInternalError(ctx, "widget create failed");
   if (argc >= 2) apply_props(ctx, obj, argv[1]);
+
+  if (magic == W_CHART) {
+    // v1 charts are single-series line charts in shift mode with hidden point
+    // dots — exactly the C demo's heap trace. The series rides in user_data so
+    // .push() can find it.
+    lv_chart_set_type(obj, LV_CHART_TYPE_LINE);
+    lv_chart_set_update_mode(obj, LV_CHART_UPDATE_MODE_SHIFT);
+    lv_obj_set_style_size(obj, 0, 0, LV_PART_INDICATOR);
+    lv_color_t sc = lv_palette_main(LV_PALETTE_CYAN);
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+      JSValue v = JS_GetPropertyStr(ctx, argv[1], "seriesColor");
+      if (!JS_IsUndefined(v) && !JS_IsNull(v)) parse_color(ctx, v, &sc);
+      JS_FreeValue(ctx, v);
+    }
+    lv_obj_set_user_data(obj, lv_chart_add_series(obj, sc, LV_CHART_AXIS_PRIMARY_Y));
+  }
   return wrap_widget(ctx, obj);
 }
 
@@ -573,6 +726,10 @@ static void install_globals(JSContext *ctx) {
   JS_SetPropertyStr(ctx, wproto, "on", JS_NewCFunction(ctx, js_widget_on, "on", 2));
   JS_SetPropertyStr(ctx, wproto, "value", JS_NewCFunction(ctx, js_widget_value, "value", 1));
   JS_SetPropertyStr(ctx, wproto, "add", JS_NewCFunction(ctx, js_widget_add, "add", 1));
+  JS_SetPropertyStr(ctx, wproto, "addTab", JS_NewCFunction(ctx, js_widget_add_tab, "addTab", 1));
+  JS_SetPropertyStr(ctx, wproto, "push", JS_NewCFunction(ctx, js_widget_push, "push", 1));
+  JS_SetPropertyStr(ctx, wproto, "clean", JS_NewCFunction(ctx, js_widget_clean, "clean", 0));
+  JS_SetPropertyStr(ctx, wproto, "bounds", JS_NewCFunction(ctx, js_widget_bounds, "bounds", 0));
   JS_SetClassProto(ctx, g_widget_class, wproto);
 
   // Timer prototype
@@ -586,7 +743,8 @@ static void install_globals(JSContext *ctx) {
   JS_SetPropertyStr(ctx, lv, "timer", JS_NewCFunction(ctx, js_lv_timer, "timer", 2));
   static const struct { const char *name; WidgetKind kind; } kMakers[] = {
       {"obj", W_OBJ}, {"button", W_BUTTON}, {"label", W_LABEL}, {"slider", W_SLIDER},
-      {"switch", W_SWITCH}, {"arc", W_ARC}, {"list", W_LIST},
+      {"switch", W_SWITCH}, {"arc", W_ARC}, {"list", W_LIST}, {"chart", W_CHART},
+      {"tabview", W_TABVIEW},
   };
   for (auto &m : kMakers) {
     JS_SetPropertyStr(ctx, lv, m.name,

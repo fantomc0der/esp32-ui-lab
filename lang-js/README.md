@@ -18,6 +18,7 @@ lang-js/
   lv-binding-js-esp32/  the LVGL bindings, an Arduino library — board-agnostic
   JsHost/               the firmware: hardware bring-up, script loader, reload
   app/app.js            the JavaScript app that ships to the SD card
+  app/selftest.js       deploy instead of app.js to check the binding layer
   flash.ps1             build/upload wrapper (links both libraries)
 ```
 

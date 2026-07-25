@@ -23,6 +23,16 @@ Flashing JsHost is a one-time step; after that the UI is data, not firmware. The
 - **SD card:** copy [`lang-js/app/app.js`](../../lang-js/app/app.js) to the root of a FAT-formatted microSD, insert it, long-press **BOOT** (≥ 700 ms). The card is re-mounted on every reload, so it can be swapped while the board is powered, and it always wins over the flash partition.
 - **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. JsHost writes the script to the internal FATFS partition and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
 
+## Checking the binding layer
+
+[`lang-js/app/selftest.js`](../../lang-js/app/selftest.js) is a script you deploy exactly like `app.js`. It exercises the binding surface and prints a `PASS`/`FAIL` line per check, ending with a count:
+
+```
+SELFTEST 35 passed, 0 failed
+```
+
+Anything other than `0 failed` means the bindings regressed. It covers widget construction, props, values, chaining, misuse rejection, `sys.*`, timers, and promise resolution, plus regression checks for two use-after-free bugs that were found on hardware (a timer callback stopping its own timer, and a widget handle used after its container was cleaned). Touch-driven behaviour is not covered, since a tap cannot be synthesized. Run it after any change to the binding library, then re-deploy `app.js`.
+
 ## Serial commands & the REPL
 
 While JsHost runs, the serial port accepts one line at a time:

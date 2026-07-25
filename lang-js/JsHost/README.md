@@ -1,8 +1,10 @@
 # JsHost — the JavaScript runtime firmware
 
-The firmware is C; the UI is not. JsHost brings up the display/touch/LVGL stack exactly like the hardware-proven C demo ([`lang-c/WaveshareVitals`](../../lang-c/WaveshareVitals/)), then hands the screen to a JavaScript file run by the vendored [QuickJS-ng engine](../quickjs-ng/README.md).
+The firmware is C; the UI is not. JsHost brings up the display/touch/LVGL stack exactly like the hardware-proven C demo ([`lang-c/WaveshareVitals`](../../lang-c/WaveshareVitals/)), then hands the screen to a JavaScript file run by the [QuickJS-ng engine](../quickjs-ng/README.md) through the [LVGL binding library](../lv-binding-js-esp32/README.md).
 
-Two docs cover this sketch: [`docs/lang-js/binding-api.md`](../../docs/lang-js/binding-api.md) is the script author's reference (what `app.js` can call), and [`docs/lang-js/architecture.md`](../../docs/lang-js/architecture.md) is the maintainer's (how the bindings, ownership rules, and reload path actually work). Read the second one before changing `js_bindings.cpp`.
+This sketch is the board-specific half: hardware bring-up, the three host hooks the bindings call, and the policy choices (where scripts come from, what triggers a reload, what the serial port does). The reusable half lives in the two libraries beside it.
+
+Two docs cover this sketch: [`docs/lang-js/binding-api.md`](../../docs/lang-js/binding-api.md) is the script author's reference (what `app.js` can call), and [`docs/lang-js/architecture.md`](../../docs/lang-js/architecture.md) is the maintainer's (how the bindings, ownership rules, and reload path actually work). Read the second one before changing the binding library.
 
 ## Where the script comes from (boot order)
 
@@ -22,7 +24,7 @@ Two extras over serial (115200): typing `reload` triggers the same reload as the
 
 ```powershell
 cd lang-js
-.\flash.ps1              # compile JsHost (links ..\quickjs-ng via --library), upload, monitor
+.\flash.ps1              # compile JsHost (links both libraries), upload, monitor
 ```
 
 Hardware files (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) are verbatim copies from `lang-c/WaveshareVitals` — fix bugs there first, then re-copy.

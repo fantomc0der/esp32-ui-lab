@@ -11,7 +11,7 @@ Five one-line type fixes in `quickjs.c` where an `int` local is passed to a func
 This folder is not installed into the Arduino libraries directory; pass it explicitly:
 
 ```powershell
-arduino-cli compile --library .\quickjs-ng -b <FQBN> .\JsHost
+arduino-cli compile --library .\quickjs-ng --library .\lv-binding-js-esp32 -b <FQBN> .\JsHost
 ```
 
 Two build requirements, both supplied by each sketch's `build_opt.h` (the esp32 core picks that file up automatically and applies its flags to library sources too): `-D_GNU_SOURCE` (upstream's CMake adds it) and `-DNDEBUG` (strips QuickJS's debug dump machinery, worth ~90 KB of flash).

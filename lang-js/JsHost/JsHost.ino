@@ -14,7 +14,10 @@
 // The serial port is a JS REPL into the running app (one line = one eval),
 // and "reload" typed on serial triggers the same reload as the button.
 //
-// Build: see lang-js/flash.ps1 (needs --library ../quickjs-ng).
+// The JS engine and the LVGL bindings are libraries beside this sketch
+// (../quickjs-ng, ../lv-binding-js-esp32); what stays here is the hardware
+// bring-up plus the policy choices: where scripts come from, what triggers a
+// reload, and what the serial port does. Build with lang-js/flash.ps1.
 
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
@@ -24,12 +27,12 @@
 #include <Wire.h>
 #include <lvgl.h>
 
+#include <js_bindings.h>
+
 #include "axs5106l_touch.h"
 #include "board_pins.h"
 #include "jd9853_panel.h"
-#include "js_bindings.h"
 #include "js_fallback.h"
-#include "quickjs.h"
 
 // QuickJS recurses on the C stack; the default 8 KB loopTask stack is too
 // small. The VM's own limit (js_bindings.cpp) stays well under this.
@@ -92,8 +95,18 @@ static void setBacklight(uint8_t percent) {
   analogWrite(LCD_PIN_BL, map(percent, 0, 100, 12, 255));
 }
 
+// The three hooks the binding library calls for anything board-specific.
 uint32_t jsvm_host_fps() { return fps_value; }
 void jsvm_host_backlight(uint8_t percent) { setBacklight(percent); }
+
+// This board halves the battery rail before the ADC. GPIO12 is an ADC2
+// channel, and the WiFi driver arbitrates ADC2, so a 0 reading means
+// "unavailable" rather than "flat"; NAN reaches scripts as null.
+float jsvm_host_battery() {
+  const uint32_t mv = analogReadMilliVolts(BAT_PIN);
+  if (mv == 0) return NAN;
+  return (mv * 2.0f) / 1000.0f;
+}
 
 // ---------------------------------------------------------------- script loading
 

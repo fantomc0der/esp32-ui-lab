@@ -14,11 +14,14 @@ The MCU never runs JS natively; the flashed firmware is still C, but it contains
 
 ```
 lang-js/
-  quickjs-ng/     the vendored engine (QuickJS-ng v0.15.1) as an Arduino library
-  JsHost/         the runtime firmware: display + touch + LVGL + bindings + loader
-  app/app.js      the JavaScript app that ships to the SD card
-  flash.ps1       build/upload wrapper (adds --library quickjs-ng)
+  quickjs-ng/           the vendored JS engine (v0.15.1), an Arduino library
+  lv-binding-js-esp32/  the LVGL bindings, an Arduino library — board-agnostic
+  JsHost/               the firmware: hardware bring-up, script loader, reload
+  app/app.js            the JavaScript app that ships to the SD card
+  flash.ps1             build/upload wrapper (links both libraries)
 ```
+
+The two libraries are the reusable half and know nothing about this board; everything board-specific is in `JsHost/`, which reaches the bindings through three host hooks. That split is what makes the JS runtime portable to other ESP32 boards.
 
 (The Phase 1 engine spike, `JsSpike/`, was deleted once JsHost superseded it; its measurements live on in [`docs/lang-js/engine-notes.md`](../docs/lang-js/engine-notes.md) and the sketch itself at commit `34e0a13`.)
 

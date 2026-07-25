@@ -4,15 +4,17 @@ The JS-specific half of [`BUILDING.md`](../../BUILDING.md): building the JsHost 
 
 ## Building JsHost
 
-`lang-js\flash.ps1` wraps everything (`-BuildOnly`, `-Port COMx`, `-Monitor` as usual). The one difference from the C build: the vendored QuickJS-ng engine is an Arduino library at `lang-js/quickjs-ng/`, linked explicitly:
+`lang-js\flash.ps1` wraps everything (`-BuildOnly`, `-Port COMx`, `-Monitor` as usual). The one difference from the C build: two Arduino libraries sit beside the sketch rather than inside it, the vendored engine at `lang-js/quickjs-ng/` and the bindings at `lang-js/lv-binding-js-esp32/`, and both are linked explicitly:
 
 ```powershell
 $fqbn = 'esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc,FlashMode=qio,USBMode=hwcdc'
-arduino-cli compile --library .\lang-js\quickjs-ng -b $fqbn .\lang-js\JsHost
+arduino-cli compile --library .\lang-js\quickjs-ng --library .\lang-js\lv-binding-js-esp32 -b $fqbn .\lang-js\JsHost
 arduino-cli upload  -b $fqbn -p COM4 .\lang-js\JsHost
 ```
 
-Forgetting `--library` fails fast with `quickjs.h: No such file or directory`. The `app3M_fat9M_16MB` partition scheme matters doubly here: it also provides the 9.9 MB FATFS partition the runtime can load scripts from.
+Omitting either `--library` fails fast, with `js_bindings.h: No such file or directory` for the bindings or `quickjs.h` for the engine. The `app3M_fat9M_16MB` partition scheme matters doubly here: it also provides the 9.9 MB FATFS partition the runtime can load scripts from.
+
+Both libraries compile against the **sketch-local** `lv_conf.h`, because the sketch folder is on the include path for library units. If you copy JsHost as a starting point for another board, keep `lv_conf.h` in the sketch folder or LVGL and the bindings will disagree about its configuration.
 
 ## Deploying app.js
 

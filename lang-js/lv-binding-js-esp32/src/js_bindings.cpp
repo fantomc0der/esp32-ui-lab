@@ -1,6 +1,7 @@
 // js_bindings.cpp — hand-written glue between QuickJS-ng and LVGL 9.
 //
-// Ownership rules (the correctness core of this whole project, see the plan):
+// Ownership rules (the correctness core of this whole project; the reasoning
+// and the teardown-order rationale are in docs/lang-js/architecture.md):
 //   * Every JSValue stored on the C side (event callbacks, timer callbacks,
 //     widget wrappers passed back into callbacks) is JS_DupValue'd at store
 //     time and freed exactly once, at a well-defined release point.
@@ -20,7 +21,6 @@
 #include <esp_heap_caps.h>
 #include <lvgl.h>
 
-#include "board_pins.h"
 #include "quickjs.h"
 
 // ---------------------------------------------------------------- VM state
@@ -661,12 +661,13 @@ static JSValue js_sys_heap(JSContext *ctx, JSValueConst, int, JSValueConst *) {
   return o;
 }
 
-// Board halves the battery rail before the ADC. GPIO12 is ADC2, which the WiFi
-// driver arbitrates — a 0 read means "unavailable", surfaced as null.
+// Reading the battery is board wiring, so the host owns it. NAN means the
+// reading is unavailable and surfaces to scripts as null rather than a
+// confident wrong number.
 static JSValue js_sys_battery(JSContext *ctx, JSValueConst, int, JSValueConst *) {
-  const uint32_t mv = analogReadMilliVolts(BAT_PIN);
-  if (mv == 0) return JS_NULL;
-  return JS_NewFloat64(ctx, (mv * 2.0) / 1000.0);
+  const float volts = jsvm_host_battery();
+  if (isnan(volts)) return JS_NULL;
+  return JS_NewFloat64(ctx, volts);
 }
 
 static JSValue js_sys_uptime(JSContext *ctx, JSValueConst, int, JSValueConst *) {

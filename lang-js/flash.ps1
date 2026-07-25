@@ -1,8 +1,8 @@
 # flash.ps1 - build + upload a lang-js sketch from the command line.
 #
 # Same idea as lang-c/flash.ps1, with two differences: the sketch is selectable
-# (-Sketch, JsHost by default) and every build links the shared vendored engine
-# via --library quickjs-ng.
+# (-Sketch, JsHost by default) and every build links the shared libraries beside
+# it (quickjs-ng, lv-binding-js-esp32) via --library.
 #
 #   .\flash.ps1                    # build JsHost, upload, monitor
 #   .\flash.ps1 -Port COM7         # force a port
@@ -19,7 +19,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $SketchPath = Join-Path $PSScriptRoot $Sketch
-$EngineLib  = Join-Path $PSScriptRoot 'quickjs-ng'
+# Vendored/shared code lives in libraries beside the sketches, not inside them.
+$Libs = @(
+    Join-Path $PSScriptRoot 'quickjs-ng'           # the JS engine
+    Join-Path $PSScriptRoot 'lv-binding-js-esp32'  # the LVGL bindings
+) | ForEach-Object { '--library', $_ }
 $Fqbn   = 'esp32:esp32:esp32s3:' + (@(
     'PSRAM=opi'                          # ESP32-S3R8 = OCTAL psram. Wrong value -> boot loop.
     'FlashSize=16M'
@@ -69,7 +73,7 @@ if ($Monitor) {
 }
 
 Write-Host '--- compiling ---'
-& $cli compile --library $EngineLib -b $Fqbn $SketchPath
+& $cli compile @Libs -b $Fqbn $SketchPath
 if ($LASTEXITCODE -ne 0) { throw 'Compile failed.' }
 Write-Host "compile OK`n"
 

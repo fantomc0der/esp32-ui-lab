@@ -11,7 +11,7 @@ How the JavaScript runtime actually works, for someone modifying it. If you only
     QuickJS-ng VM                   lang-js/quickjs-ng/, heap in PSRAM
           │  lv.button(p,{...}) / widget.on("click", fn)
           ▼
-    binding layer                   lang-js/JsHost/js_bindings.cpp
+    binding layer                   lang-js/lv-binding-js-esp32/
           │  lv_button_create() / lv_obj_add_event_cb()
           ▼
        LVGL 9.5                     widget tree, layout, rendering
@@ -20,9 +20,15 @@ How the JavaScript runtime actually works, for someone modifying it. If you only
   Arduino_GFX → JD9853 panel        lang-js/JsHost/JsHost.ino
 ```
 
-Four files carry the whole design. `JsHost.ino` owns the hardware and the process lifecycle: display bring-up, LVGL wiring, the script loader, the serial protocol, and the main loop. `js_bindings.cpp` owns everything about the JavaScript world: the VM, the bindings, and the ownership machinery. `js_bindings.h` is the boundary between them, deliberately tiny (start, stop, eval a line, pump jobs, plus two callbacks the host provides). `js_fallback.h` holds the script baked into flash for when no `app.js` is found.
+The split between the sketch and the binding library is a deliberate boundary rather than filing. Two Arduino libraries sit beside the sketch and are linked with `--library`: `quickjs-ng/` (the vendored engine) and `lv-binding-js-esp32/` (the bindings). Neither knows anything about this board.
 
-Note the direction of the dependency at the bottom. The bindings never reach into the sketch's globals; where they need something only the host knows, the host supplies it through `jsvm_host_fps()` and `jsvm_host_backlight()`, declared in the header and defined in the `.ino`. That inversion is what keeps `js_bindings.cpp` portable to another board: swap the `.ino` and the bindings compile unchanged.
+Inside the library, `js_bindings.cpp` owns everything about the JavaScript world: the VM, the bindings, and the ownership machinery. `js_bindings.h` is the whole public surface, deliberately tiny: start, stop, eval a line, pump jobs, plus the three hooks the host must implement.
+
+In the sketch, `JsHost.ino` owns the hardware and the process lifecycle: display bring-up, LVGL wiring, the script loader, the serial protocol, and the main loop. `js_fallback.h` holds the script baked into flash for when no `app.js` is found. The hardware headers (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) are verbatim copies from the C demo.
+
+Note the direction of the dependency. The bindings never reach into the sketch's globals; where they need something only the host knows, the host supplies it through `jsvm_host_fps()`, `jsvm_host_backlight()`, and `jsvm_host_battery()`, declared in the library header and defined in the `.ino`. Those three functions are the entire porting contract: bring LVGL up however a different board requires, implement them, and the binding library compiles unchanged.
+
+One build subtlety worth knowing: the sketch folder is on the include path for library compilation units (verified in the build's `-I` flags), which is how the sketch-local `lv_conf.h` governs LVGL *and* the binding library. Both see the same LVGL configuration, so there is no risk of the two disagreeing about struct layouts.
 
 ## The threading rule
 

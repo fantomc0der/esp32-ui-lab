@@ -49,7 +49,7 @@ Which parts of this are board-specific and which transfer to other hardware is a
 
 ## The JS way
 
-`lang-js/` contains three pieces: the vendored engine (`quickjs-ng/`, an Arduino library), the runtime firmware (`JsHost/`), and the script that ships to the board (`app/app.js`).
+`lang-js/` separates the reusable half from the board-specific half. Two Arduino libraries hold the reusable part: `quickjs-ng/` (the vendored engine) and `lv-binding-js-esp32/` (the LVGL bindings, which know nothing about any particular board). `JsHost/` is the firmware that owns the hardware and the policy decisions, and `app/app.js` is the script that ships to the board.
 
 `JsHost` performs the same hardware bring-up as the C demo, then hands the screen to a JavaScript file. The hardware glue files are **verbatim copies** from `lang-c/WaveshareVitals`: `board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, and `lv_conf.h`. The rule for those is fix in `lang-c` first, then re-copy, so the C demo stays the single source of hardware truth. Duplication was chosen over a shared directory because it keeps each way independently openable in the Arduino IDE, which matters for a repo whose purpose is showing complete, self-contained approaches.
 

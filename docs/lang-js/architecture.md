@@ -116,6 +116,14 @@ For widgets, LVGL owns the tree; the JS object is a **weak reference**. Wrappers
 
 For timers, the opaque is nulled inside `timer_release()` before the struct is freed, which makes a later `.stop()` on a stopped timer a harmless no-op instead of a double free.
 
+### Re-entrancy: trampolines must hold their own references
+
+A callback is allowed to destroy the binding that invoked it. `lv.timer(ms, () => t.stop())` is the ordinary one-shot idiom, and a click handler calling `lv.screen().clean()` deletes the very widget being dispatched. Both free the binding, and with it the `JSValue`s the trampoline is mid-call on.
+
+`JS_Call` **borrows** its function and arguments; it neither consumes nor retains a reference (that is what the separate `JS_CallFree` is for). So releasing the last reference to a function while it is executing frees the closure underneath the interpreter. On hardware this presents as a `LoadProhibited` panic, not a clean error.
+
+Every trampoline therefore dups what it passes in, calls, then frees. `wifi_poll_timer()` shows the same shape for a different reason: it releases the scan slot before invoking the callback, so the callback may start a new scan, and holds the function alive across the call by hand.
+
 The intrusive lists (`g_events`, `g_timers`) exist because the DELETE hook does not cover everything. `lv_obj_clean(screen)` deletes the screen's *children*, so a binding attached to the screen object itself never receives `LV_EVENT_DELETE`. The lists let teardown find those stragglers.
 
 ### Known hazard: dangling widget handles
@@ -171,4 +179,4 @@ The allocator has one non-negotiable rule, learned by crashing: `js_malloc_usabl
 
 ## Deliberate limitations
 
-One script file, no module system and no `import`. No filesystem access from JS, by design: the host owns storage. Three font sizes, 14, 16 and 20, because each compiled font costs flash. No widget deletion beyond `.clean()`. No `setTimeout`. The surface is roughly fifteen functions because every addition is a permanent maintenance and correctness obligation, and the plan's stated risk was scope creep, not scarcity.
+One script file, no module system and no `import`. No filesystem access from JS, by design: the host owns storage. Three font sizes, 14, 16 and 20, because each compiled font costs flash. No widget deletion beyond `.clean()`. No `setTimeout`. The surface is about twenty functions because every addition is a permanent maintenance and correctness obligation, and the [stated risk](design-rationale.md) was scope creep, not scarcity.

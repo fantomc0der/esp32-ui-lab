@@ -7,6 +7,10 @@
 //     time and freed exactly once, at a well-defined release point.
 //   * Event bindings are released by an LV_EVENT_DELETE hook on their widget,
 //     so deleting a widget can never leave a callback pointing at freed JS.
+//   * A trampoline holds its own reference to everything it passes into JS,
+//     for the duration of the call: JS_Call only borrows its arguments, and a
+//     callback is allowed to destroy the binding that invoked it (stop its own
+//     timer, clean away its own widget). Never hand b->fn straight to JS_Call.
 //   * Every binding also sits in a global intrusive list; jsvm_stop() walks
 //     whatever the DELETE hooks didn't reach (bindings on the screen object,
 //     which lv_obj_clean() does not delete) before freeing the context.
@@ -90,19 +94,29 @@ static void event_unlink_and_free(EventBinding *b) {
 
 static void event_trampoline(lv_event_t *e) {
   EventBinding *b = static_cast<EventBinding *>(lv_event_get_user_data(e));
+  // Same borrow hazard as timer_trampoline: a handler may destroy the very
+  // widget it is attached to (any ancestor's .clean(), including
+  // lv.screen().clean()), which fires LV_EVENT_DELETE and frees this binding
+  // mid-call. Hold both values ourselves for the duration.
+  JSValue fn = JS_DupValue(g_ctx, b->fn);
+  JSValue widget = JS_DupValue(g_ctx, b->widget);
+
   // Pointer events carry the touch point: fn(widget, x, y). Non-pointer
   // dispatches (e.g. a value change set from code) just get fn(widget).
   lv_indev_t *indev = lv_indev_active();
   if (indev) {
     lv_point_t pt;
     lv_indev_get_point(indev, &pt);
-    JSValue args[3] = {b->widget, JS_NewInt32(g_ctx, pt.x), JS_NewInt32(g_ctx, pt.y)};
-    js_call_reporting(b->fn, 3, args);
+    JSValue args[3] = {widget, JS_NewInt32(g_ctx, pt.x), JS_NewInt32(g_ctx, pt.y)};
+    js_call_reporting(fn, 3, args);
     JS_FreeValue(g_ctx, args[1]);
     JS_FreeValue(g_ctx, args[2]);
   } else {
-    js_call_reporting(b->fn, 1, &b->widget);
+    js_call_reporting(fn, 1, &widget);
   }
+
+  JS_FreeValue(g_ctx, fn);
+  JS_FreeValue(g_ctx, widget);
 }
 
 static void event_delete_cb(lv_event_t *e) {
@@ -131,7 +145,14 @@ static void timer_release(TimerBinding *b, bool delete_lv_timer) {
 
 static void timer_trampoline(lv_timer_t *t) {
   TimerBinding *b = static_cast<TimerBinding *>(lv_timer_get_user_data(t));
-  js_call_reporting(b->fn, 0, nullptr);
+  // Hold our own reference across the call. The callback may stop its own
+  // timer — `const t = lv.timer(ms, () => t.stop())` is the one-shot idiom —
+  // which frees this binding and its JSValues. JS_Call only *borrows*
+  // func_obj, so dropping the last reference mid-call frees the closure
+  // underneath the running interpreter (verified: LoadProhibited panic).
+  JSValue fn = JS_DupValue(g_ctx, b->fn);
+  js_call_reporting(fn, 0, nullptr);
+  JS_FreeValue(g_ctx, fn);
 }
 
 static JSValue js_timer_stop(JSContext *ctx, JSValueConst this_val, int, JSValueConst *) {

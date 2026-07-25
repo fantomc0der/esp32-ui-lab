@@ -8,7 +8,7 @@ The MCU never runs JS natively; the flashed firmware is still C, but it contains
 
 ## Why not just use lvgljs?
 
-[lvgljs](https://lvgl.io/docs/open/integration/bindings/javascript) targets **embedded Linux** (Raspberry Pi-class hardware): its stack includes libuv and curl, which need POSIX. This board runs FreeRTOS. We keep lvgljs's architecture (engine + bindings + scripts-as-data) and drop its Linux-only layers. Details and trade-offs are in the plan.
+[lvgljs](https://lvgl.io/docs/open/integration/bindings/javascript) targets **embedded Linux** (Raspberry Pi-class hardware): its stack includes libuv and curl, which need POSIX. This board runs FreeRTOS. We keep lvgljs's architecture (engine + bindings + scripts-as-data) and drop its Linux-only layers. Details and trade-offs are in the [design rationale](../docs/lang-js/design-rationale.md).
 
 ## Layout
 

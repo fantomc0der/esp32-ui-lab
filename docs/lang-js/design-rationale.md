@@ -38,7 +38,7 @@ The feasibility estimates made before any code was written, against what it actu
 | CPU | "fine at UI event rates" | `1+1` in 1.1 ms; the whole 4-tab UI builds in 74 ms; rendering is untouched |
 | Whole firmware | not estimated | 1.79 MB, 56% of the 3 MB app partition |
 
-Every estimate was conservative, which is the desirable direction. The engine came in roughly 40% under the low end of the flash estimate.
+Every estimate was conservative, which is the desirable direction. The engine landed about 14% under the low end of the flash estimate, and roughly 46% under the high end.
 
 ## How it was built
 

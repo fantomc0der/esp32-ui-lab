@@ -44,7 +44,8 @@ Accepted at creation and via `.set(props)`. Unknown keys are ignored (scripts sh
 | `clickable` | boolean, adds/removes the clickable flag (plain `lv.obj` isn't clickable by default) |
 | `hidden` | boolean |
 | `rotation`, `angles`, `knob` | arc only: start rotation, `[bgStart, bgEnd]` angles, and `knob: false` turns the arc into a pure indicator (no knob, not touchable) |
-| `points`, `divs`, `seriesColor` | chart only: point count, `[hDiv, vDiv]` grid lines, series color |
+| `points`, `divs` | chart only: point count, `[hDiv, vDiv]` grid lines |
+| `seriesColor` | chart only, **at creation only**: the line color. Ignored by `.set()`, since the series is created with the widget. |
 | `bar` | tabview only: tab-bar height in pixels |
 
 ### Widget methods
@@ -81,6 +82,7 @@ This is the correctness core of the binding layer; the invariants, in script-aut
 
 - Every callback you pass to `.on()` or `lv.timer()` is retained by the C side (`JS_DupValue`) and released exactly once. Event callbacks are released by an `LV_EVENT_DELETE` hook on their widget, timer callbacks when `.stop()` is called or the app is torn down.
 - A callback that throws is reported over serial (message + stack) and the app keeps running; exceptions never unwind into C.
+- A callback may destroy what invoked it. Stopping your own timer (`const t = lv.timer(200, () => t.stop())`, the one-shot idiom) and calling `.clean()` on a container that holds the widget you are handling are both safe: the binding layer holds its own references for the duration of the call.
 - Widget handles are weak: LVGL owns the widget tree, JS holds bare pointers. v1 exposes no `delete`, so a handle can only dangle across a reload, and a reload destroys the whole JS context first — stale handles cannot survive it.
 - Teardown order on reload is fixed: JS timers → `lv_obj_clean(screen)` (fires the DELETE hooks) → screen-level bindings → context → runtime. Scripts don't clean up after themselves; there is nothing they need to (or can) do at teardown.
 - The JS heap lives in PSRAM (measured: the engine costs ~80 KB of PSRAM and ~350 bytes of internal RAM at rest); internal RAM stays reserved for draw buffers and the radio.

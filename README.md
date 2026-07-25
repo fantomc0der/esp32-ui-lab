@@ -18,7 +18,7 @@ UI logic written in JavaScript, executed by a QuickJS-ng engine embedded in the 
 
 - [`docs/hardware.md`](docs/hardware.md) — the board itself (pinout, traps, quirks). Shared: applies to every way.
 - [`docs/lang-c/`](docs/README.md) — display pipeline, touch driver post-mortem, portability analysis, build/flash reference.
-- [`docs/lang-js/`](docs/README.md) — the JS-runtime plan (and, later, the binding API reference).
+- [`docs/lang-js/`](docs/README.md) — the JS runtime: architecture, script API reference, design rationale, build/deploy, and engine notes.
 
 ## Quick start
 

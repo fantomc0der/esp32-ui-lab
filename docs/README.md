@@ -8,6 +8,7 @@ Organized to mirror the repo's per-language `lang-*/` directories (see the [top-
 
 | Doc | What's in it |
 |---|---|
+| [architecture.md](architecture.md) | How the repo fits together: the stack both ways share, where they diverge, the single-task rule, and the constraints that shaped everything |
 | [hardware.md](hardware.md) | The board itself: pinout, chip quirks, what the microSD slot is for, traps specific to this exact Waveshare variant |
 
 ## `lang-c/` — the C/C++ way
@@ -23,6 +24,7 @@ Organized to mirror the repo's per-language `lang-*/` directories (see the [top-
 
 | Doc | What's in it |
 |---|---|
+| [lang-js/architecture.md](lang-js/architecture.md) | How the runtime works internally: the layer stack, threading rule, call and event flow, JSValue ownership, teardown order, memory map, and how to extend it |
 | [lang-js/js-scripting-plan.md](lang-js/js-scripting-plan.md) | The phased plan for running QuickJS + LVGL bindings on this board, with feasibility budget and risks — all phases now done and hardware-verified |
 | [lang-js/build-and-deploy.md](lang-js/build-and-deploy.md) | Building JsHost (the --library flag), deploying app.js via SD card or serial, the REPL/upload serial commands, expected boot log |
 | [lang-js/binding-api.md](lang-js/binding-api.md) | The JavaScript API exposed to app.js (lv/sys/wifi/console), props reference, and the GC ownership rules |

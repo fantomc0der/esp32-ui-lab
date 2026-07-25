@@ -10,8 +10,9 @@
 //     whatever the DELETE hooks didn't reach (bindings on the screen object,
 //     which lv_obj_clean() does not delete) before freeing the context.
 //   * Widget wrappers hold a bare lv_obj_t* and no finalizer: LVGL owns the
-//     widget tree. In v1 scripts cannot delete widgets, so a wrapper can only
-//     dangle across a reload — and a reload destroys the context holding it.
+//     widget tree, so a wrapper is a weak reference. A handle kept across a
+//     .clean() of its parent dangles; see the hazard note in
+//     docs/lang-js/architecture.md.
 
 #include "js_bindings.h"
 

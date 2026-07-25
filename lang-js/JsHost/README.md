@@ -1,6 +1,8 @@
 # JsHost — the JavaScript runtime firmware
 
-The firmware is C; the UI is not. JsHost brings up the display/touch/LVGL stack exactly like the hardware-proven C demo ([`lang-c/WaveshareVitals`](../../lang-c/WaveshareVitals/)), then hands the screen to a JavaScript file run by the vendored [QuickJS-ng engine](../quickjs-ng/README.md). The script API and ownership rules: [`docs/lang-js/binding-api.md`](../../docs/lang-js/binding-api.md).
+The firmware is C; the UI is not. JsHost brings up the display/touch/LVGL stack exactly like the hardware-proven C demo ([`lang-c/WaveshareVitals`](../../lang-c/WaveshareVitals/)), then hands the screen to a JavaScript file run by the vendored [QuickJS-ng engine](../quickjs-ng/README.md).
+
+Two docs cover this sketch: [`docs/lang-js/binding-api.md`](../../docs/lang-js/binding-api.md) is the script author's reference (what `app.js` can call), and [`docs/lang-js/architecture.md`](../../docs/lang-js/architecture.md) is the maintainer's (how the bindings, ownership rules, and reload path actually work). Read the second one before changing `js_bindings.cpp`.
 
 ## Where the script comes from (boot order)
 

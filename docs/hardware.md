@@ -18,13 +18,13 @@ All of this was verified on real hardware on 2026-07-25 unless marked otherwise.
 
 Cross-checked across three sources (Waveshare wiki, their ESP-IDF BSP headers,
 and a working community sketch); per-pin citations live in
-[`board_pins.h`](../WaveshareVitals/board_pins.h).
+[`board_pins.h`](../lang-c/WaveshareVitals/board_pins.h).
 
 | Function | GPIO |
 |---|---|
 | LCD SCK / MOSI / DC / CS / RST / Backlight | 38 / 39 / 45 / 21 / 40 / 46 |
 | Touch I2C SDA / SCL | 42 / 41 |
-| Touch RST + INT (ambiguous — see [touch.md](touch.md)) | 47, 48 |
+| Touch RST + INT (ambiguous — see [touch.md](lang-c/touch.md)) | 47, 48 |
 | microSD CLK / CMD / D0–D3 | 16 / 15 / 17, 18, 13, 14 |
 | Battery ADC (÷2 divider) | 12 |
 | BOOT button | 0 |

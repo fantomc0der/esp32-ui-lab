@@ -25,7 +25,7 @@ esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDC
 | `CDCOnBoot=cdc` | Without it, `Serial` over the native USB-C port is silent. |
 | `USBMode=hwcdc` | Native USB-Serial/JTAG mode (what the board actually has). |
 
-`flash.ps1` in the repo root encodes all of this: `.\flash.ps1` /
+`flash.ps1` in the `lang-c/` folder encodes all of this: `.\flash.ps1` /
 `-BuildOnly` / `-Port COMx` / `-Monitor`.
 
 ## Manual CLI equivalents
@@ -79,8 +79,8 @@ $p.Close(); $buf
 [boot] ready
 ```
 
-Anything else, see the troubleshooting table in the top-level
-[README](../README.md). Reopen the serial monitor after each reset — native
+Anything else, see the troubleshooting table in the C-way
+[README](../../lang-c/README.md). Reopen the serial monitor after each reset — native
 USB re-enumerates and the old handle dies.
 
 ## Build stats (final verified build)

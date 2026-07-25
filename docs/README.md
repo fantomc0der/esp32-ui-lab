@@ -27,4 +27,4 @@ Organized to mirror the repo's per-language `lang-*/` directories (see the [top-
 | [lang-js/binding-api.md](lang-js/binding-api.md) | The JavaScript API exposed to app.js (lv/sys/wifi/console), props reference, and the GC ownership rules |
 | [lang-js/engine-notes.md](lang-js/engine-notes.md) | QuickJS-ng on this board: spike measurements, the heap-poisoning/usable_size trap, the job pump, the Xtensa type patches, the DTR/RTS bootloader trap |
 
-Start with the [`lang-c/` README](../lang-c/README.md) for setup + deployment of the working demo; come here for the deeper "how does this actually work" material.
+Start with [`BUILDING.md`](../BUILDING.md) at the repo root for setup + deployment of either demo; come here for the deeper "how does this actually work" material.

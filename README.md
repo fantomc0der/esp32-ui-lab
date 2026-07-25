@@ -22,4 +22,4 @@ UI logic written in JavaScript, executed by a QuickJS-ng engine embedded in the 
 
 ## Quick start
 
-You want the working demo: read [`lang-c/README.md`](lang-c/README.md), copy `lang-c/WaveshareVitals/` into your Arduino sketchbook (or run `lang-c/flash.ps1` with arduino-cli), and flash. The board shows up as a `USB Serial Device` on the native USB-C port — use a **data** cable.
+Build/deploy instructions for both ways (toolchain setup, the FQBN, the flash scripts, getting `app.js` onto the board) live in [`BUILDING.md`](BUILDING.md). The short version: `cd lang-c` (or `lang-js`) and run `.\flash.ps1`. The board shows up as a `USB Serial Device` on the native USB-C port — use a **data** cable.

@@ -1,10 +1,8 @@
 # Docs index
 
-Topic notes for this repo — written so future-you (or a future session) can
-recall *why* things are the way they are without re-deriving them.
+Topic notes for this repo — written so future-you (or a future session) can recall *why* things are the way they are without re-deriving them.
 
-Organized to mirror the repo's per-language `lang-*/` directories (see the
-[top-level README](../README.md)).
+Organized to mirror the repo's per-language `lang-*/` directories (see the [top-level README](../README.md)).
 
 ## Shared (applies to every way)
 
@@ -27,6 +25,4 @@ Organized to mirror the repo's per-language `lang-*/` directories (see the
 |---|---|
 | [lang-js/js-scripting-plan.md](lang-js/js-scripting-plan.md) | The phased plan for running QuickJS + LVGL bindings on this board, with feasibility budget and risks |
 
-Start with the [`lang-c/` README](../lang-c/README.md) for setup + deployment
-of the working demo; come here for the deeper "how does this actually work"
-material.
+Start with the [`lang-c/` README](../lang-c/README.md) for setup + deployment of the working demo; come here for the deeper "how does this actually work" material.

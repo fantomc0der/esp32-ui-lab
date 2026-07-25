@@ -2,18 +2,16 @@
 
 Minimal go/no-go sketch proving [QuickJS-ng](https://github.com/quickjs-ng/quickjs) runs on the Waveshare ESP32-S3-Touch-LCD-1.47 with its JS heap in PSRAM. Serial only, no display. The plan this gates: [`docs/lang-js/js-scripting-plan.md`](../../docs/lang-js/js-scripting-plan.md).
 
-## What's vendored here
+## Where the engine lives
 
-QuickJS-ng **v0.15.1** (tag `fd0a0210`): the four core sources from its CMake `qjs_sources` (`quickjs.c`, `libregexp.c`, `libunicode.c`, `dtoa.c`) plus every header they include. The only local modifications are five one-line type fixes in `quickjs.c` where an `int` local is passed to a function expecting `int32_t*` (or vice versa): on this Xtensa toolchain `int32_t` is `long int`, not `int`, so GCC 14 rejects the mismatched pointers. Each site is marked with an `xtensa` comment; grep `int32_t is long` to find them when re-vendoring a newer release. `quickjs-libc.c` (the POSIX stdlib layer) is deliberately **not** vendored — it needs processes/fds/sockets and we replace it with our own bindings. License: MIT, see `QUICKJS-NG-LICENSE`.
-
-`build_opt.h` supplies the compile flags the upstream CMake build would add (`-D_GNU_SOURCE`) plus `-DNDEBUG` (strips QuickJS's debug dump machinery; the esp32 Arduino core reads this file automatically).
+The QuickJS-ng sources are vendored once for all `lang-js/` sketches as an Arduino library in [`../quickjs-ng/`](../quickjs-ng/README.md) (version, exclusions, and the five Xtensa type patches are documented there). This folder holds only the spike sketch itself plus `build_opt.h`, which supplies the flags the engine needs (`-D_GNU_SOURCE`, `-DNDEBUG`).
 
 ## Build & flash
 
-Same FQBN as the C demo (see [`docs/lang-c/build-and-flash.md`](../../docs/lang-c/build-and-flash.md)):
+Same FQBN as the C demo (see [`docs/lang-c/build-and-flash.md`](../../docs/lang-c/build-and-flash.md)), plus the `--library` flag pointing at the shared engine:
 
 ```powershell
-arduino-cli compile -b esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc,FlashMode=qio,USBMode=hwcdc .\JsSpike
+arduino-cli compile --library ..\quickjs-ng -b esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc,FlashMode=qio,USBMode=hwcdc .\JsSpike
 arduino-cli upload  -b <same FQBN> -p COM4 .\JsSpike
 ```
 

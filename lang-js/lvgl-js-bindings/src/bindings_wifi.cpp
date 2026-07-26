@@ -182,6 +182,12 @@ static JSValue js_wifi_status(JSContext *ctx, JSValueConst, int, JSValueConst *)
   JS_SetPropertyStr(ctx, o, "ip", JS_NewString(ctx, up ? WiFi.localIP().toString().c_str() : ""));
   JS_SetPropertyStr(ctx, o, "rssi", JS_NewInt32(ctx, up ? WiFi.RSSI() : 0));
   JS_SetPropertyStr(ctx, o, "saved", JS_NewBool(ctx, g_want_connection));
+  // Why it isn't connecting, so a setup UI can say something better than
+  // "not connected" and the user isn't left guessing whether to wait or retype
+  // the password. Empty while connected or before the first failed attempt.
+  JS_SetPropertyStr(ctx, o, "error",
+                    JS_NewString(ctx, (!up && g_attempts > 0) ? reason_name(g_last_reason) : ""));
+  JS_SetPropertyStr(ctx, o, "attempts", JS_NewInt32(ctx, g_attempts));
   return o;
 }
 

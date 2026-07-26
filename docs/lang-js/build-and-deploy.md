@@ -50,6 +50,15 @@ While js-host runs, the serial port accepts one line at a time:
 
 Paths are on the SD card, or on the flash partition with a `flash:` prefix.
 
+**Send UTF-8.** The upload is a plain byte stream, so a terminal that transmits ASCII silently replaces every non-ASCII character with `?` — a `°` in a script becomes `?` on screen, and nothing reports an error. In PowerShell that means setting the encoding explicitly, since `SerialPort` defaults to ASCII:
+
+```powershell
+$port.Encoding = [System.Text.Encoding]::UTF8
+Get-Content script.js -Encoding UTF8 | ForEach-Object { $port.WriteLine($_) }
+```
+
+Copying the file onto the SD card sidesteps this entirely. The compiled fonts do cover Latin-1, so `°` renders fine once it actually arrives intact.
+
 The REPL shares the app's global scope, so `sys.heap()`, poking widgets held in top-level `const`s, or arming a quick `lv.timer` all work live.
 
 ## Expected boot log

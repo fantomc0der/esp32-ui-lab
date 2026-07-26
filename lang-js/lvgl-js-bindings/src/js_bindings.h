@@ -73,6 +73,17 @@ void jsvm_set_filesystem(fs::FS *sd, fs::FS *flash);
 // wifi.save(). Call once from setup(); returns false when nothing is saved.
 // Reconnection after that is automatic and event-driven.
 bool jsvm_wifi_autoconnect();
+
+// True when the running script has used the network bindings and there is no
+// network for it to use: nothing saved, and nothing connected. It answers the
+// question "would this app be better off if the user set up Wi-Fi right now?",
+// which a host can turn into an offer to do so.
+//
+// Interest resets with every script, so an app that never touches the network
+// never reports true. The other two conditions are the device's rather than
+// the app's: saved-but-not-connected is a link to wait out rather than
+// something to set up, so it reports false. Cheap enough to poll from loop().
+bool jsvm_network_setup_needed();
 #endif
 
 // ---- app switching ---------------------------------------------------------

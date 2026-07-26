@@ -121,7 +121,7 @@ function showPassword(ssid) {
   });
 
   // The keyboard stops short of the right edge so it does not sit underneath
-  // the firmware's home button.
+  // the firmware's corner button.
   const kb = lv.keyboard(scr, { w: 280, h: 104, align: "bottom-left", x: 0, y: 0 });
   kb.target(field);
   kb.on("ready", () => next(() => join(ssid, field.value())));

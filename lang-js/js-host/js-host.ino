@@ -8,18 +8,24 @@
 // The board runs one script at a time and boots into /app.js, the launcher,
 // which lists the other scripts on the card and starts whichever you tap. A
 // script asks to switch with sys.launch(), and there are two ways back that no
-// app can break: the home button the firmware draws on LVGL's top layer, and a
-// long-press of BOOT. Every switch is queued and performed from loop(), never
-// from inside a callback (see requestApp).
+// app can break: the button the firmware draws in the corner of LVGL's top
+// layer, and a long-press of BOOT. Every switch is queued and performed from
+// loop(), never from inside a callback (see requestApp).
 //
 // A missing or throwing app falls back to the launcher; a missing launcher
 // falls back to a screen built into the firmware, so the panel is never dead.
 //
 // Pinning turns the board into a single-app appliance: with a pin set (sys.pin()
 // from a script, or `pin` over serial) the boot goes straight to that script and
-// the home button is not drawn at all, so nothing on screen hints at a launcher
-// that is no longer part of the product. BOOT long-press still reaches it, which
-// is how you unpin a board with no serial attached.
+// the corner stays empty, so nothing on screen hints at a launcher that is no
+// longer part of the product. BOOT long-press still reaches it, which is how you
+// unpin a board with no serial attached.
+//
+// That corner is one slot showing at most one control, chosen from where you
+// are and what the app needs (see updateCornerButton): the way back out of an
+// app, and — for an app that wants a network the board has not got — the way
+// to the Wi-Fi setup app, which is the one thing a pinned appliance cannot
+// otherwise offer a route to.
 //
 // The serial port is a JS REPL into the running app plus a few host commands
 // (home, reload, pin, unpin, ls, rm, app-begin/app-end) — see pollSerialRepl().
@@ -137,14 +143,18 @@ static char *readAll(fs::FS &fs, const char *path) {
 // from it, and it is where a failed app lands you.
 static const char *kLauncher = "/app.js";
 
+// The network setup app. Which script that is, is host policy in the same way
+// the launcher is: the binding layer reports that the running app wants a
+// network it hasn't got, and this is where the firmware sends you to fix it.
+static const char *kWifiApp = "/apps/wifi.js";
+
 static bool g_sd_ok = false;
 static bool g_flash_ok = false;
 static char g_current_app[128] = "";
 static char g_next_app[128] = "";
-static lv_obj_t *g_home_btn = nullptr;
 
 // Queues an app switch. Every path that changes apps goes through here — a
-// script's sys.launch(), the home button, the BOOT button — so the actual
+// script's sys.launch(), the corner button, the BOOT button — so the actual
 // teardown always happens from loop() and never from inside a callback that
 // the teardown would pull the ground out from under.
 static void requestApp(const char *path) {
@@ -164,19 +174,67 @@ static char *loadScript(const char *path) {
   return src;
 }
 
-// The home button is derived state: it appears only when there is somewhere to
-// go back to. A pin says this board runs one app, so it hides for good — an
-// escape hatch you are not meant to use is just a stray control on the UI.
-// Cheap enough to call every loop(), which is what keeps it right when a script
-// pins or unpins while running.
-static void updateHomeButton() {
-  if (!g_home_btn) return;
-  const bool want = jsvm_pinned_app() == nullptr && strcmp(g_current_app, kLauncher) != 0;
-  static bool shown = false;  // createHomeButton() starts it hidden
-  if (want == shown) return;
-  shown = want;
-  if (want) lv_obj_remove_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
-  else lv_obj_add_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
+// ---------------------------------------------------------------- corner button
+
+// One slot in the bottom-right corner, and at most one control in it. What
+// belongs there is derived from where you are and what the running app needs,
+// never set by whoever caused the change, because a script can pin itself or
+// discover it has no network at any moment.
+//
+// The enum stays out of every function signature on purpose: the Arduino
+// preprocessor generates a prototype for each function in a .ino and inserts
+// them all above the sketch's own code, so a signature naming a type declared
+// here does not compile.
+enum CornerButton {
+  kCornerNone,
+  kCornerHome,  // to the launcher
+  kCornerBack,  // to the pinned app, from a detour away from it
+  kCornerWifi,  // to network setup
+};
+
+static lv_obj_t *g_corner_btn = nullptr;
+static lv_obj_t *g_corner_icon = nullptr;
+static CornerButton g_corner = kCornerNone;  // createCornerButton() starts it hidden
+
+// Where leaving the current app goes. Normally the launcher; on a pinned board
+// the pinned app, since a pin says the launcher is not part of the product and
+// the appliance is what you expect to come back to.
+static const char *cornerBackTarget() {
+  const char *pinned = jsvm_pinned_app();
+  return pinned ? pinned : kLauncher;
+}
+
+// Cheap enough to call every loop(), which is what keeps the corner right
+// without anything having to remember to update it.
+static void updateCornerButton() {
+  if (!g_corner_btn) return;
+
+  CornerButton want;
+  if (jsvm_network_setup_needed() && strcmp(g_current_app, kWifiApp) != 0) {
+    // Setup outranks navigation. An app with no network to talk to is stuck at
+    // something the user can fix in two taps, and on a pinned board this is the
+    // only visible route to fixing it — the corner would otherwise be empty and
+    // a BOOT long-press is not something anyone discovers. Not offered inside
+    // the Wi-Fi app itself, which is already the destination.
+    want = kCornerWifi;
+  } else if (strcmp(g_current_app, cornerBackTarget()) == 0) {
+    // Nothing to offer while you are already where the button would take you:
+    // an escape hatch you are not meant to use is a stray control on the UI.
+    want = kCornerNone;
+  } else {
+    want = jsvm_pinned_app() ? kCornerBack : kCornerHome;
+  }
+
+  if (want == g_corner) return;
+  g_corner = want;
+  if (want == kCornerNone) {
+    lv_obj_add_flag(g_corner_btn, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  lv_label_set_text(g_corner_icon, want == kCornerWifi ? LV_SYMBOL_WIFI
+                                 : want == kCornerBack ? LV_SYMBOL_LEFT
+                                                       : LV_SYMBOL_HOME);
+  lv_obj_remove_flag(g_corner_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
 // Starts a script. A missing or throwing app falls back to the launcher, and
@@ -211,32 +269,36 @@ static void runApp(const char *path) {
     g_current_app[0] = '\0';
   }
 
-  updateHomeButton();
+  updateCornerButton();
 }
 
-// The way back, drawn once and owned by the firmware. It lives on LVGL's top
-// layer rather than the active screen, so jsvm_stop()'s lv_obj_clean() cannot
-// delete it and no script can reach it — every app gets an escape hatch it is
-// incapable of breaking. Tapping only queues the switch; see requestApp().
-static void homeClicked(lv_event_t *) { requestApp(kLauncher); }
+// Tapping only queues the switch; see requestApp(). Reading g_corner rather
+// than recomputing keeps the tap honest: you get the button you saw.
+static void cornerClicked(lv_event_t *) {
+  requestApp(g_corner == kCornerWifi ? kWifiApp : cornerBackTarget());
+}
 
-static void createHomeButton() {
-  g_home_btn = lv_button_create(lv_layer_top());
-  lv_obj_set_size(g_home_btn, 34, 34);
-  lv_obj_align(g_home_btn, LV_ALIGN_BOTTOM_RIGHT, -3, -3);
-  lv_obj_set_style_radius(g_home_btn, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(g_home_btn, lv_color_hex(0x000000), 0);
-  lv_obj_set_style_bg_opa(g_home_btn, LV_OPA_60, 0);
-  lv_obj_set_style_border_color(g_home_btn, lv_color_hex(0xFFFFFF), 0);
-  lv_obj_set_style_border_width(g_home_btn, 1, 0);
-  lv_obj_set_style_border_opa(g_home_btn, LV_OPA_50, 0);
-  lv_obj_set_style_shadow_width(g_home_btn, 0, 0);
-  lv_obj_add_event_cb(g_home_btn, homeClicked, LV_EVENT_CLICKED, nullptr);
+// Drawn once and owned by the firmware. It lives on LVGL's top layer rather
+// than the active screen, so jsvm_stop()'s lv_obj_clean() cannot delete it and
+// no script can reach it — every app gets an escape hatch it is incapable of
+// breaking.
+static void createCornerButton() {
+  g_corner_btn = lv_button_create(lv_layer_top());
+  lv_obj_set_size(g_corner_btn, 34, 34);
+  lv_obj_align(g_corner_btn, LV_ALIGN_BOTTOM_RIGHT, -3, -3);
+  lv_obj_set_style_radius(g_corner_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(g_corner_btn, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_bg_opa(g_corner_btn, LV_OPA_60, 0);
+  lv_obj_set_style_border_color(g_corner_btn, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_border_width(g_corner_btn, 1, 0);
+  lv_obj_set_style_border_opa(g_corner_btn, LV_OPA_50, 0);
+  lv_obj_set_style_shadow_width(g_corner_btn, 0, 0);
+  lv_obj_add_event_cb(g_corner_btn, cornerClicked, LV_EVENT_CLICKED, nullptr);
 
-  lv_obj_t *icon = lv_label_create(g_home_btn);
-  lv_label_set_text(icon, LV_SYMBOL_HOME);
-  lv_obj_center(icon);
-  lv_obj_add_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
+  g_corner_icon = lv_label_create(g_corner_btn);
+  lv_label_set_text(g_corner_icon, LV_SYMBOL_HOME);
+  lv_obj_center(g_corner_icon);
+  lv_obj_add_flag(g_corner_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
 // ---------------------------------------------------------------- setup / loop
@@ -303,7 +365,7 @@ void setup() {
                 g_sd_ok ? "ok" : "none", g_flash_ok ? "ok" : "none");
   jsvm_set_filesystem(g_sd_ok ? &SD_MMC : nullptr, g_flash_ok ? &FFat : nullptr);
 
-  createHomeButton();
+  createCornerButton();
 
   // Safe here: LVGL exists, so the binding can create its reconnect timer.
   if (!jsvm_wifi_autoconnect()) {
@@ -476,7 +538,9 @@ void loop() {
 
   pollSerialRepl();
   jsvm_pump();  // promise reactions / async continuations
-  updateHomeButton();  // a script may have pinned or unpinned since last pass
+  // A script may have pinned itself, or found it has no network, since the
+  // last pass.
+  updateCornerButton();
 
   // Switch apps only here, once everything that could be mid-callback has
   // finished: LVGL event dispatch, the serial REPL, and the promise queue can

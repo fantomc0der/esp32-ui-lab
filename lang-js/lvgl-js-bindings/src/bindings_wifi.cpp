@@ -35,6 +35,12 @@ static bool g_events_hooked = false;
 // Cleared by wifi.forget() so the reconnect handler stops fighting the user.
 static bool g_want_connection = false;
 
+// Set the first time the running script asks anything about the network, and
+// cleared when that script is torn down. It is what lets a host offer Wi-Fi
+// setup to an app that needs it without offering it to a clock — see
+// jsvm_network_setup_needed().
+static bool g_network_touched = false;
+
 // Retrying is supervised from an lv_timer rather than driven straight from the
 // WiFi event, for two reasons. Events arrive on the system event task, so
 // creating or touching anything LVGL owns from there would break the
@@ -175,6 +181,7 @@ static JSValue js_wifi_connect(JSContext *ctx, JSValueConst, int, JSValueConst *
 
 // Deliberately never reports the password.
 static JSValue js_wifi_status(JSContext *ctx, JSValueConst, int, JSValueConst *) {
+  g_network_touched = true;
   const bool up = WiFi.status() == WL_CONNECTED;
   JSValue o = JS_NewObject(ctx);
   JS_SetPropertyStr(ctx, o, "connected", JS_NewBool(ctx, up));
@@ -373,6 +380,7 @@ static void fetch_poll_timer(lv_timer_t *) {
 
 static JSValue js_fetch(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
   if (argc < 1) return JS_ThrowTypeError(ctx, "fetch(url) needs a url");
+  g_network_touched = true;
   if (g_fetch_busy) return JS_ThrowInternalError(ctx, "a fetch is already in flight");
   if (WiFi.status() != WL_CONNECTED) return JS_ThrowInternalError(ctx, "not connected to wifi");
 
@@ -404,9 +412,30 @@ static JSValue js_fetch(JSContext *ctx, JSValueConst, int argc, JSValueConst *ar
   return promise;
 }
 
+// ---------------------------------------------------------------- setup prompt
+
+// "The script on screen wants the network and there is no network to want."
+//
+// Interest is inferred rather than declared: a script says it needs the radio
+// by using it, which is a signal no app author can forget to send and no app
+// that ignores the network can accidentally send. The cost is that it arrives
+// on the first call rather than at load.
+//
+// Both suppressors earn their place. Credentials that are merely failing to
+// connect are not this — retrying is the binding's job, and a setup screen has
+// nothing to fix — so a saved network suppresses it however badly the link is
+// behaving. A live connection suppresses it too, which covers a board joined
+// by something other than wifi.save().
+bool jsvm_network_setup_needed() {
+  return g_network_touched && !g_want_connection && WiFi.status() != WL_CONNECTED;
+}
+
 // ---------------------------------------------------------------- lifecycle
 
 void js_teardown_wifi() {
+  // Interest belongs to the script that showed it, not to the device.
+  g_network_touched = false;
+
   // Abandon any in-flight fetch. The worker may still be running, so bump the
   // generation instead of killing it: its result becomes a no-op.
   if (g_fetch_busy) {

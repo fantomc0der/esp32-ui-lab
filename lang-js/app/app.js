@@ -5,10 +5,10 @@
 // so this file never has to think about the return trip.
 //
 // Long-press a row to pin that app. A pinned board boots straight into it and
-// the firmware stops drawing the home button, which is what turns the device
-// from a launcher with apps on it into an appliance that runs one thing. This
-// screen stays reachable with a long-press of BOOT, and long-pressing the
-// pinned row again releases it.
+// the firmware draws nothing over it, which is what turns the device from a
+// launcher with apps on it into an appliance that runs one thing. This screen
+// stays reachable with a long-press of BOOT, and long-pressing the pinned row
+// again releases it.
 
 const scr = lv.screen().set({ bg: "#0B1622" });
 

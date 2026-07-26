@@ -22,7 +22,22 @@ How the JavaScript runtime actually works, for someone modifying it. If you only
 
 The split between the sketch and the binding library is a deliberate boundary rather than filing. Two Arduino libraries sit beside the sketch and are linked with `--library`: `quickjs-ng/` (the vendored engine) and `lv-binding-js-esp32/` (the bindings). Neither knows anything about this board.
 
-Inside the library, `js_bindings.cpp` owns everything about the JavaScript world: the VM, the bindings, and the ownership machinery. `js_bindings.h` is the whole public surface, deliberately tiny: start, stop, eval a line, pump jobs, plus the three hooks the host must implement.
+Inside the binding library, one file owns correctness and the rest own vocabulary:
+
+| File | Owns |
+|---|---|
+| `js_bindings.h` | the entire public surface: start, stop, eval a line, pump jobs, plus the three host hooks |
+| `jsvm_internal.h` | what the core shares with the modules, and nothing more |
+| `jsvm_core.cpp` | QuickJS lifecycle, the PSRAM allocator, JSValue ownership, the trampolines, teardown order, `console` |
+| `bindings_lv.cpp` | the `lv` global: widget constructors, props, widget methods |
+| `bindings_sys.cpp` | the `sys` global |
+| `bindings_wifi.cpp` | the `wifi` global |
+
+The rule that keeps the split honest: **a module never stores a `JSValue`.** Anything that must outlive a call is handed to the core through `jsvm_bind_event()` or `jsvm_create_timer()`, which dup it and free it at one place. That is why the ownership rules can be reasoned about by reading a single file, even though four files can hold callbacks.
+
+`jsvm_core.cpp` is also the composition root, so it is the one place naming the modules: it calls each `js_install_*()` on every start, since a reload builds a fresh context. Modules holding state across calls also expose a teardown, which the core runs first, before any widget is deleted. Today only `wifi` needs one. `sys` and `wifi` can be compiled out entirely with `-DJSVM_WITH_SYS=0` / `-DJSVM_WITH_WIFI=0`, which is what makes the library usable on a board with no radio without editing it.
+
+Per-widget files were considered and rejected. `lv_binding_js` needs them because a React reconciler wants per-component prop diffing; here all nine widgets share one `apply_props`, so a widget is an enum value, a `switch` case, and a table row. Nine files of ten lines would be more structure describing less code.
 
 In the sketch, `JsHost.ino` owns the hardware and the process lifecycle: display bring-up, LVGL wiring, the script loader, the serial protocol, and the main loop. `js_fallback.h` holds the script baked into flash for when no `app.js` is found. The hardware headers (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) are verbatim copies from the C demo.
 

@@ -16,6 +16,17 @@
 
 #include <Arduino.h>
 
+// Optional modules, on by default. Define to 0 in your sketch's build_opt.h to
+// leave one out of the build entirely (e.g. -DJSVM_WITH_WIFI=0 on a board with
+// no radio, which also drops WiFi.h from the firmware). The `lv` and `console`
+// globals are core and always present.
+#ifndef JSVM_WITH_SYS
+#define JSVM_WITH_SYS 1
+#endif
+#ifndef JSVM_WITH_WIFI
+#define JSVM_WITH_WIFI 1
+#endif
+
 // Creates a runtime and context (JS heap in PSRAM), installs the lv/sys/wifi/
 // console globals, and evaluates src. Any previously running script is torn
 // down first. Returns false if evaluation threw, in which case the exception

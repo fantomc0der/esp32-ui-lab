@@ -26,6 +26,14 @@ Full reference with every prop and its accepted values: [`docs/lang-js/binding-a
 
 Anything not in that list has to be added to the binding layer in C before a script can reach it — that is the cost of a hand-written binding rather than a generated one. Adding a widget is about three lines; [`docs/lang-js/architecture.md`](../../docs/lang-js/architecture.md) has the recipes.
 
+## What's in src/
+
+`jsvm_core.cpp` is the VM: QuickJS lifecycle, the PSRAM allocator, JSValue ownership, and teardown order. `bindings_lv.cpp`, `bindings_sys.cpp`, and `bindings_wifi.cpp` are one global each. `js_bindings.h` is the whole public surface; `jsvm_internal.h` is what the core shares with the modules.
+
+The invariant that keeps them separable: a binding module never stores a `JSValue`. Callbacks are handed to the core, which owns their lifetime. If you add a module, follow that.
+
+`sys` and `wifi` are optional — build with `-DJSVM_WITH_SYS=0` or `-DJSVM_WITH_WIFI=0` (in your sketch's `build_opt.h`) to leave either out entirely, which also drops `WiFi.h` from the firmware. `lv` and `console` are core and always present.
+
 ## Requirements
 
 LVGL 9.x, the ESP32 Arduino core, PSRAM (the JS heap lives there), and the `quickjs-ng` library that ships alongside this one in [`../quickjs-ng/`](../quickjs-ng/README.md). Budget roughly 430 KB of flash for the engine and ~80 KB of PSRAM at rest.

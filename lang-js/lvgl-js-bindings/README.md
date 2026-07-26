@@ -1,4 +1,4 @@
-# lv-binding-js-esp32
+# lvgl-js-bindings
 
 Script an [LVGL 9](https://lvgl.io) UI in JavaScript on the ESP32, using a QuickJS-ng engine embedded in the firmware. The UI becomes a text file you load at runtime instead of code you compile in.
 
@@ -68,7 +68,7 @@ void loop() {
 }
 ```
 
-Loading that script from an SD card or flash partition, hot-reloading it on a button press, and exposing a serial REPL are all host policy and deliberately live outside this library. [`../JsHost/`](../JsHost/README.md) is a complete worked example of all three.
+Loading that script from an SD card or flash partition, hot-reloading it on a button press, and exposing a serial REPL are all host policy and deliberately live outside this library. [`../js-host/`](../js-host/README.md) is a complete worked example of all three.
 
 ## The rule that matters
 

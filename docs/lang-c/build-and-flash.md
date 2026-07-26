@@ -29,8 +29,8 @@ esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDC
 ## Manual CLI equivalents
 
 ```powershell
-arduino-cli compile -b <FQBN> --warnings all .\WaveshareVitals
-arduino-cli upload  -b <FQBN> -p COM4 .\WaveshareVitals
+arduino-cli compile -b <FQBN> --warnings all .\app
+arduino-cli upload  -b <FQBN> -p COM4 .\app
 arduino-cli monitor -p COM4 --config baudrate=115200
 ```
 
@@ -63,7 +63,7 @@ $p.Close(); $buf
 ## Expected boot log
 
 ```
-[boot] WaveshareVitals starting
+[boot] app starting
 [boot] display 320x172
 [touch] AXS5106L ok, id = 51 06 01
 [boot] lvgl draw buffers: 13440 bytes each

@@ -1,6 +1,6 @@
-# JsHost — the JavaScript runtime firmware
+# js-host — the JavaScript runtime firmware
 
-The firmware is C; the UI is not. JsHost brings up the display/touch/LVGL stack exactly like the hardware-proven C demo ([`lang-c/WaveshareVitals`](../../lang-c/WaveshareVitals/)), then hands the screen to a JavaScript file run by the [QuickJS-ng engine](../quickjs-ng/README.md) through the [LVGL binding library](../lv-binding-js-esp32/README.md).
+The firmware is C; the UI is not. js-host brings up the display/touch/LVGL stack exactly like the hardware-proven C demo ([`lang-c/app`](../../lang-c/app/)), then hands the screen to a JavaScript file run by the [QuickJS-ng engine](../quickjs-ng/README.md) through the [LVGL binding library](../lvgl-js-bindings/README.md).
 
 This sketch is the board-specific half: hardware bring-up, the three host hooks the bindings call, and the policy choices (where scripts come from, what triggers a reload, what the serial port does). The reusable half lives in the two libraries beside it.
 
@@ -24,7 +24,7 @@ Two extras over serial (115200): typing `reload` triggers the same reload as the
 
 ```powershell
 cd lang-js
-.\flash.ps1              # compile JsHost (links both libraries), upload, monitor
+.\flash.ps1              # compile js-host (links both libraries), upload, monitor
 ```
 
-Hardware files (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) are verbatim copies from `lang-c/WaveshareVitals` — fix bugs there first, then re-copy.
+Hardware files (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) are verbatim copies from `lang-c/app` — fix bugs there first, then re-copy.

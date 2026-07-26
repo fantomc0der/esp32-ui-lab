@@ -30,7 +30,7 @@ Change the UI in C and you recompile and reflash, about a minute. Change it in J
 
 ## The shared foundation
 
-Four concerns are solved identically in both, and were solved first in `lang-c/WaveshareVitals` against hardware:
+Four concerns are solved identically in both, and were solved first in `lang-c/app` against hardware:
 
 - **Display bring-up.** The panel is a JD9853 driven through Arduino_GFX's ST7789 class plus a JD9853-specific register blob, with a 34-pixel column offset centering the 172-wide panel in the controller's 240-wide RAM. Details: [`lang-c/display-pipeline.md`](lang-c/display-pipeline.md).
 - **The flush path.** LVGL renders RGB565 little-endian, the panel wants big-endian, and exactly one swap happens: `lv_draw_sw_rgb565_swap()` followed by `draw16bitBeRGBBitmap()`. Pairing either with the wrong partner double-corrects and produces wrong colors.
@@ -41,7 +41,7 @@ Both sketches also share one process-level rule: **a single task does everything
 
 ## The C implementation
 
-`lang-c/WaveshareVitals/` is one firmware image containing a four-tab dashboard. Its structure is flat on purpose: four `build*Tab()` functions called once from `buildUi()`, two `lv_timer`s driving live values (vitals at 500 ms, WiFi scan polling at 250 ms), and a `loop()` that calls `lv_timer_handler()`, maintains the FPS counter, and debounces the BOOT button.
+`lang-c/app/` is one firmware image containing a four-tab dashboard. Its structure is flat on purpose: four `build*Tab()` functions called once from `buildUi()`, two `lv_timer`s driving live values (vitals at 500 ms, WiFi scan polling at 250 ms), and a `loop()` that calls `lv_timer_handler()`, maintains the FPS counter, and debounces the BOOT button.
 
 Worth knowing: the FPS figure counts flush-callback invocations, not loop iterations, because loop iterations only measure polling rate. The "load" arc is render throughput against a 30 flush/s target, not CPU load, and is labelled as such on screen. Battery voltage reads `null`-ish when WiFi is active, because GPIO12 is an ADC2 channel and the radio arbitrates ADC2.
 
@@ -49,9 +49,9 @@ Which parts of this are board-specific and which transfer to other hardware is a
 
 ## The JavaScript implementation
 
-`lang-js/` separates the reusable half from the board-specific half. Two Arduino libraries hold the reusable part: `quickjs-ng/` (the vendored engine) and `lv-binding-js-esp32/` (the LVGL bindings, which know nothing about any particular board). `JsHost/` is the firmware that owns the hardware and the policy decisions, and `app/app.js` is the script that ships to the board.
+`lang-js/` separates the reusable half from the board-specific half. Two Arduino libraries hold the reusable part: `quickjs-ng/` (the vendored engine) and `lvgl-js-bindings/` (the LVGL bindings, which know nothing about any particular board). `js-host/` is the firmware that owns the hardware and the policy decisions, and `app/app.js` is the script that ships to the board.
 
-`JsHost` performs the same hardware bring-up as the C demo, then hands the screen to a JavaScript file. The hardware glue files are **verbatim copies** from `lang-c/WaveshareVitals`: `board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, and `lv_conf.h`. The rule for those is fix in `lang-c` first, then re-copy, so the C demo stays the single source of hardware truth. Duplication was chosen over a shared directory because it keeps each sketch independently openable in the Arduino IDE, which matters for a repo whose purpose is showing complete, self-contained approaches.
+`js-host` performs the same hardware bring-up as the C demo, then hands the screen to a JavaScript file. The hardware glue files are **verbatim copies** from `lang-c/app`: `board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, and `lv_conf.h`. The rule for those is fix in `lang-c` first, then re-copy, so the C demo stays the single source of hardware truth. Duplication was chosen over a shared directory because it keeps each sketch independently openable in the Arduino IDE, which matters for a repo whose purpose is showing complete, self-contained approaches.
 
 Everything above the hardware, meaning the VM, the LVGL bindings, the ownership machinery, the script loader, the reload path, and the serial protocol, is documented in [`lang-js/architecture.md`](lang-js/architecture.md).
 

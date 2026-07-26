@@ -10,7 +10,7 @@
 | `jd9853_panel.h` | 99 | **100%** — JD9853 register blob. Any other panel controller: delete; a supported controller needs no blob at all. |
 | `axs5106l_touch.{h,cpp}` | 103 | **~80%** — the I2C protocol is AXS5106L-specific; the axis transform is *this panel's* measured orientation. The polling *pattern* (pulse-both-reset, poll instead of INT) is a reusable idea. |
 | `lv_conf.h` | 1 191 | **~1%** — generic LVGL 9 config; only the enabled font sizes (14/16/20) were chosen for this screen's DPI. Reusable nearly as-is. |
-| `WaveshareVitals.ino` | 441 | **mixed** — see breakdown below. |
+| `app.ino` | 441 | **mixed** — see breakdown below. |
 
 ## Inside the .ino (441 lines)
 

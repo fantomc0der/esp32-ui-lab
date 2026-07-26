@@ -1,6 +1,6 @@
-# WaveshareVitals
+# Compiled C UI
 
-An LVGL 9 touch demo for the **Waveshare ESP32-S3-Touch-LCD-1.47** (172×320 IPS, JD9853 display, AXS5106L touch), built for Arduino IDE.
+An LVGL 9 touch demo for the **Waveshare ESP32-S3-Touch-LCD-1.47** (172×320 IPS, JD9853 display, AXS5106L touch), built for Arduino IDE. The sketch lives in [`app/`](app/); everything is compiled into one firmware image, so changing the UI means recompiling and reflashing.
 
 Four swipeable tabs, each chosen to prove a different part of the board works:
 
@@ -44,11 +44,11 @@ Nothing else — no `TFT_eSPI`, no separate touch library. The AXS5106L driver s
 
 ### 1c. Put the sketch where Arduino IDE expects it
 
-Arduino requires a sketch's folder name to match its `.ino` name. Copy the whole `WaveshareVitals` folder into your sketchbook:
+Arduino requires a sketch's folder name to match its `.ino` name. Copy the whole `app` folder into your sketchbook:
 
 ```
-C:\Users\<you>\Documents\Arduino\WaveshareVitals\
-    WaveshareVitals.ino
+C:\Users\<you>\Documents\Arduino\app\
+    app.ino
     axs5106l_touch.cpp
     axs5106l_touch.h
     board_pins.h
@@ -56,7 +56,7 @@ C:\Users\<you>\Documents\Arduino\WaveshareVitals\
     lv_conf.h
 ```
 
-Then **File → Open…** and pick `WaveshareVitals.ino`. The other files appear as tabs and compile automatically — you don't add them anywhere.
+Then **File → Open…** and pick `app.ino`. The other files appear as tabs and compile automatically — you don't add them anywhere.
 
 > **On `lv_conf.h`:** most LVGL-on-Arduino guides tell you to copy `lv_conf.h` into `Documents\Arduino\libraries\` next to the `lvgl` folder. **Don't** — this project ships its own `lv_conf.h` inside the sketch folder, which LVGL 9 picks up via `__has_include`. Verified working. Keeping it here means the config travels with the sketch and survives LVGL upgrades. If you already have a stray `lv_conf.h` in your `libraries\` root from another project, it will win and may break this build — rename it.
 
@@ -136,7 +136,7 @@ Hard resetting via RTS pin...
 Open **Tools → Serial Monitor** at **115200 baud**. You should see:
 
 ```
-[boot] WaveshareVitals starting
+[boot] app starting
 [boot] display 320x172
 [touch] AXS5106L ok, id = ...
 [boot] lvgl draw buffers: 13760 bytes each

@@ -4,7 +4,7 @@ Engine-level knowledge collected while bringing QuickJS-ng up on this board. The
 
 ## Phase 1 spike measurements (hardware, 2026-07-25)
 
-Measured with a serial-only spike sketch (engine + REPL, no display; it lived at `lang-js/JsSpike/`, deleted after JsHost superseded it — commit `34e0a13` has it in full). Baseline for the deltas: a bare `Serial.begin` sketch on the same FQBN.
+Measured with a serial-only spike sketch (engine + REPL, no display; it lived at `lang-js/JsSpike/`, deleted after js-host superseded it — commit `34e0a13` has it in full). Baseline for the deltas: a bare `Serial.begin` sketch on the same FQBN.
 
 | Metric | Value |
 |---|---|
@@ -22,7 +22,7 @@ QuickJS treats the reported usable size as *writable capacity* and fills it to t
 
 ## Trap 2: promises need a job pump
 
-`JS_ExecutePendingJob` is normally driven by quickjs-libc's event loop, which is not vendored (it needs POSIX). Without pumping it yourself, `.then()` callbacks and `async`/`await` continuations queue forever and never run — everything else works, which makes it easy to miss. JsHost pumps the queue once per `loop()` (`jsvm_pump()`).
+`JS_ExecutePendingJob` is normally driven by quickjs-libc's event loop, which is not vendored (it needs POSIX). Without pumping it yourself, `.then()` callbacks and `async`/`await` continuations queue forever and never run — everything else works, which makes it easy to miss. js-host pumps the queue once per `loop()` (`jsvm_pump()`).
 
 ## Trap 3: the Xtensa `int32_t` type mismatch
 

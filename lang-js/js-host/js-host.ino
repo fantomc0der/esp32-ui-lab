@@ -1,8 +1,8 @@
-// JsHost — JavaScript-scripted LVGL runtime for the Waveshare
+// js-host — JavaScript-scripted LVGL runtime for the Waveshare
 // ESP32-S3-Touch-LCD-1.47.
 //
 // The firmware is C; the UI is not. At boot this sketch brings up the display,
-// touch, and LVGL exactly like the proven C demo (lang-c/WaveshareVitals),
+// touch, and LVGL exactly like the proven C demo (lang-c/app),
 // then hands control to a JavaScript file executed by QuickJS-ng:
 //
 //   1. /app.js on the microSD card        (edit on a PC, move the card)
@@ -15,7 +15,7 @@
 // and "reload" typed on serial triggers the same reload as the button.
 //
 // The JS engine and the LVGL bindings are libraries beside this sketch
-// (../quickjs-ng, ../lv-binding-js-esp32); what stays here is the hardware
+// (../quickjs-ng, ../lvgl-js-bindings); what stays here is the hardware
 // bring-up plus the policy choices: where scripts come from, what triggers a
 // reload, and what the serial port does. Build with lang-js/flash.ps1.
 
@@ -39,7 +39,7 @@
 SET_LOOP_TASK_STACK_SIZE(32 * 1024);
 
 // ---------------------------------------------------------------- display stack
-// Identical to lang-c/WaveshareVitals — see that sketch and docs/lang-c/ for
+// Identical to lang-c/app — see that sketch and docs/lang-c/ for
 // the reasoning behind every constant here.
 
 Arduino_DataBus *bus =
@@ -171,7 +171,7 @@ static void runApp() {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n[boot] JsHost starting");
+  Serial.println("\n[boot] js-host starting");
 
   pinMode(LCD_PIN_BL, OUTPUT);
   analogWrite(LCD_PIN_BL, 0);  // no garbage RAM on the panel during init

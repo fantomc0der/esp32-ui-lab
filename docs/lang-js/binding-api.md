@@ -1,6 +1,6 @@
-# JsHost binding API
+# js-host binding API
 
-The JavaScript surface exposed by the [`lv-binding-js-esp32`](../../lang-js/lv-binding-js-esp32/README.md) library. Deliberately curated, not exhaustive: about twenty functions covering the 20% of LVGL that delivers 80% of a small-panel UI. Everything runs on one FreeRTOS task (the same one that runs `lv_timer_handler`), so there is no locking anywhere and callbacks never race the renderer.
+The JavaScript surface exposed by the [`lvgl-js-bindings`](../../lang-js/lvgl-js-bindings/README.md) library. Deliberately curated, not exhaustive: about twenty functions covering the 20% of LVGL that delivers 80% of a small-panel UI. Everything runs on one FreeRTOS task (the same one that runs `lv_timer_handler`), so there is no locking anywhere and callbacks never race the renderer.
 
 ## Globals
 

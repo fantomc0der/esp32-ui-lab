@@ -1,27 +1,27 @@
 # Build & deploy — JavaScript
 
-The JS-specific half of [`BUILDING.md`](../../BUILDING.md): building the JsHost firmware and getting `app.js` onto the board. Toolchain setup, the FQBN, and general USB/serial troubleshooting are shared with the C sketch — see [`BUILDING.md`](../../BUILDING.md) and [`lang-c/build-and-flash.md`](../lang-c/build-and-flash.md).
+The JS-specific half of [`BUILDING.md`](../../BUILDING.md): building the js-host firmware and getting `app.js` onto the board. Toolchain setup, the FQBN, and general USB/serial troubleshooting are shared with the C sketch — see [`BUILDING.md`](../../BUILDING.md) and [`lang-c/build-and-flash.md`](../lang-c/build-and-flash.md).
 
-## Building JsHost
+## Building js-host
 
-`lang-js\flash.ps1` wraps everything (`-BuildOnly`, `-Port COMx`, `-Monitor` as usual). The one difference from the C build: two Arduino libraries sit beside the sketch rather than inside it, the vendored engine at `lang-js/quickjs-ng/` and the bindings at `lang-js/lv-binding-js-esp32/`, and both are linked explicitly:
+`lang-js\flash.ps1` wraps everything (`-BuildOnly`, `-Port COMx`, `-Monitor` as usual). The one difference from the C build: two Arduino libraries sit beside the sketch rather than inside it, the vendored engine at `lang-js/quickjs-ng/` and the bindings at `lang-js/lvgl-js-bindings/`, and both are linked explicitly:
 
 ```powershell
 $fqbn = 'esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc,FlashMode=qio,USBMode=hwcdc'
-arduino-cli compile --library .\lang-js\quickjs-ng --library .\lang-js\lv-binding-js-esp32 -b $fqbn .\lang-js\JsHost
-arduino-cli upload  -b $fqbn -p COM4 .\lang-js\JsHost
+arduino-cli compile --library .\lang-js\quickjs-ng --library .\lang-js\lvgl-js-bindings -b $fqbn .\lang-js\js-host
+arduino-cli upload  -b $fqbn -p COM4 .\lang-js\js-host
 ```
 
 Omitting either `--library` fails fast, with `js_bindings.h: No such file or directory` for the bindings or `quickjs.h` for the engine. The `app3M_fat9M_16MB` partition scheme matters doubly here: it also provides the 9.9 MB FATFS partition the runtime can load scripts from.
 
-Both libraries compile against the **sketch-local** `lv_conf.h`, because the sketch folder is on the include path for library units. If you copy JsHost as a starting point for another board, keep `lv_conf.h` in the sketch folder or LVGL and the bindings will disagree about its configuration.
+Both libraries compile against the **sketch-local** `lv_conf.h`, because the sketch folder is on the include path for library units. If you copy js-host as a starting point for another board, keep `lv_conf.h` in the sketch folder or LVGL and the bindings will disagree about its configuration.
 
 ## Deploying app.js
 
-Flashing JsHost is a one-time step; after that the UI is data, not firmware. The boot search order is `sd:/app.js` → `ffat:/app.js` → a built-in "no app.js found" fallback screen. Two ways to ship a script:
+Flashing js-host is a one-time step; after that the UI is data, not firmware. The boot search order is `sd:/app.js` → `ffat:/app.js` → a built-in "no app.js found" fallback screen. Two ways to ship a script:
 
 - **SD card:** copy [`lang-js/app/app.js`](../../lang-js/app/app.js) to the root of a FAT-formatted microSD, insert it, long-press **BOOT** (≥ 700 ms). The card is re-mounted on every reload, so it can be swapped while the board is powered, and it always wins over the flash partition.
-- **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. JsHost writes the script to the internal FATFS partition and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
+- **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. js-host writes the script to the internal FATFS partition and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
 
 ## Checking the binding layer
 
@@ -35,7 +35,7 @@ Anything other than `0 failed` means the bindings regressed. It covers widget co
 
 ## Serial commands & the REPL
 
-While JsHost runs, the serial port accepts one line at a time:
+While js-host runs, the serial port accepts one line at a time:
 
 | Input | Effect |
 |---|---|
@@ -49,7 +49,7 @@ The REPL shares the app's global scope, so `sys.heap()`, poking widgets held in 
 ## Expected boot log
 
 ```
-[boot] JsHost starting
+[boot] js-host starting
 [boot] display 320x172
 [touch] AXS5106L ok, id = 51 06 01
 [app] running ffat:/app.js

@@ -6,10 +6,10 @@ The counterpart to [`lang-c/portability.md`](../lang-c/portability.md), answerin
 
 | Component | Lines | Board-specific? |
 |---|---|---|
-| `lv-binding-js-esp32/src/` | 1190 | **0%** — knows LVGL, QuickJS and the Arduino ESP32 core. No pins, no panel, no resolution. The `sys` and `wifi` modules compile out via `-DJSVM_WITH_SYS=0` / `-DJSVM_WITH_WIFI=0`. |
+| `lvgl-js-bindings/src/` | 1190 | **0%** — knows LVGL, QuickJS and the Arduino ESP32 core. No pins, no panel, no resolution. The `sys` and `wifi` modules compile out via `-DJSVM_WITH_SYS=0` / `-DJSVM_WITH_WIFI=0`. |
 | `quickjs-ng/src/` | vendored | **0%** — plain C, five Xtensa type patches (see [engine-notes.md](engine-notes.md)). |
-| `JsHost/JsHost.ino` | 332 | **~35%** — display construction, pin use, SD_MMC wiring, and the three host hooks. The loader, reload, and serial protocol are policy you'd likely keep. |
-| `JsHost/` hardware headers | — | **100%** — verbatim copies from `lang-c/`; see its [portability doc](../lang-c/portability.md). |
+| `js-host/js-host.ino` | 332 | **~35%** — display construction, pin use, SD_MMC wiring, and the three host hooks. The loader, reload, and serial protocol are policy you'd likely keep. |
+| `js-host/` hardware headers | — | **100%** — verbatim copies from `lang-c/`; see its [portability doc](../lang-c/portability.md). |
 | `app/app.js` | 100 | **~60%** — pixel geometry chosen for 320×172. The API calls themselves port unchanged. |
 
 ## Hard requirements

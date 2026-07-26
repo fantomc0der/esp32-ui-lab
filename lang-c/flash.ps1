@@ -1,4 +1,4 @@
-# flash.ps1 - build + upload WaveshareVitals from the command line.
+# flash.ps1 - build + upload app from the command line.
 #
 # Handy alternative to clicking through Arduino IDE, and it prints the exact
 # board options so nothing depends on remembering menu state.
@@ -16,7 +16,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$Sketch = Join-Path $PSScriptRoot 'WaveshareVitals'
+$Sketch = Join-Path $PSScriptRoot 'app'
 $Fqbn   = 'esp32:esp32:esp32s3:' + (@(
     'PSRAM=opi'                          # ESP32-S3R8 = OCTAL psram. Wrong value -> boot loop.
     'FlashSize=16M'

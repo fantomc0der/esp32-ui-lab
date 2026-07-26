@@ -41,7 +41,7 @@ One firmware image containing the whole demo; changing the UI means recompiling 
 cd lang-js; .\flash.ps1
 ```
 
-Flash the JsHost runtime once; after that the UI is an `app.js` file you deploy as data — SD card + BOOT long-press, or pasted over serial — with no recompile. Builds differ from the C sketch only in linking two libraries that sit beside it (the JS engine and the LVGL bindings) with `--library`. Details (manual CLI, deploying app.js, the serial REPL and upload protocol, expected boot log): [`docs/lang-js/build-and-deploy.md`](docs/lang-js/build-and-deploy.md).
+Flash the js-host runtime once; after that the UI is an `app.js` file you deploy as data — SD card + BOOT long-press, or pasted over serial — with no recompile. Builds differ from the C sketch only in linking two libraries that sit beside it (the JS engine and the LVGL bindings) with `--library`. Details (manual CLI, deploying app.js, the serial REPL and upload protocol, expected boot log): [`docs/lang-js/build-and-deploy.md`](docs/lang-js/build-and-deploy.md).
 
 ## If something misbehaves
 

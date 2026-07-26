@@ -1,4 +1,4 @@
-// WaveshareVitals — an LVGL 9 demo for the Waveshare ESP32-S3-Touch-LCD-1.47.
+// app.ino — an LVGL 9 touch demo for the Waveshare ESP32-S3-Touch-LCD-1.47.
 //
 // What it shows off, and why each part is here:
 //
@@ -421,7 +421,7 @@ static void buildUi() {
 void setup() {
   Serial.begin(115200);
   delay(200);  // give native-USB CDC a moment to come up
-  Serial.println("\n[boot] WaveshareVitals starting");
+  Serial.println("\n[boot] app starting");
 
   // Backlight off during init so the user never sees garbage RAM on the panel.
   pinMode(LCD_PIN_BL, OUTPUT);

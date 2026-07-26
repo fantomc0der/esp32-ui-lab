@@ -1,16 +1,16 @@
 # flash.ps1 - build + upload a lang-js sketch from the command line.
 #
 # Same idea as lang-c/flash.ps1, with two differences: the sketch is selectable
-# (-Sketch, JsHost by default) and every build links the shared libraries beside
-# it (quickjs-ng, lv-binding-js-esp32) via --library.
+# (-Sketch, js-host by default) and every build links the shared libraries beside
+# it (quickjs-ng, lvgl-js-bindings) via --library.
 #
-#   .\flash.ps1                    # build JsHost, upload, monitor
+#   .\flash.ps1                    # build js-host, upload, monitor
 #   .\flash.ps1 -Port COM7         # force a port
 #   .\flash.ps1 -BuildOnly         # compile only
 #   .\flash.ps1 -Monitor           # just open the serial monitor
 
 param(
-    [string]$Sketch = 'JsHost',
+    [string]$Sketch = 'js-host',
     [string]$Port,
     [switch]$BuildOnly,
     [switch]$Monitor
@@ -21,8 +21,8 @@ $ErrorActionPreference = 'Stop'
 $SketchPath = Join-Path $PSScriptRoot $Sketch
 # Vendored/shared code lives in libraries beside the sketches, not inside them.
 $Libs = @(
-    Join-Path $PSScriptRoot 'quickjs-ng'           # the JS engine
-    Join-Path $PSScriptRoot 'lv-binding-js-esp32'  # the LVGL bindings
+    Join-Path $PSScriptRoot 'quickjs-ng'        # the JS engine
+    Join-Path $PSScriptRoot 'lvgl-js-bindings'  # the LVGL bindings
 ) | ForEach-Object { '--library', $_ }
 $Fqbn   = 'esp32:esp32:esp32s3:' + (@(
     'PSRAM=opi'                          # ESP32-S3R8 = OCTAL psram. Wrong value -> boot loop.

@@ -1,4 +1,4 @@
-# JsHost architecture
+# js-host architecture
 
 How the JavaScript runtime actually works, for someone modifying it. If you only want to *write* scripts, [`binding-api.md`](binding-api.md) is the reference you want; this document is the layer beneath it. The design rationale and the alternatives that were rejected live in [`design-rationale.md`](design-rationale.md), and engine-level measurements and traps are in [`engine-notes.md`](engine-notes.md).
 
@@ -11,16 +11,16 @@ How the JavaScript runtime actually works, for someone modifying it. If you only
     QuickJS-ng VM                   lang-js/quickjs-ng/, heap in PSRAM
           │  lv.button(p,{...}) / widget.on("click", fn)
           ▼
-    binding layer                   lang-js/lv-binding-js-esp32/
+    binding layer                   lang-js/lvgl-js-bindings/
           │  lv_button_create() / lv_obj_add_event_cb()
           ▼
        LVGL 9.5                     widget tree, layout, rendering
           │  flush callback, RGB565 little-endian
           ▼
-  Arduino_GFX → JD9853 panel        lang-js/JsHost/JsHost.ino
+  Arduino_GFX → JD9853 panel        lang-js/js-host/js-host.ino
 ```
 
-The split between the sketch and the binding library is a deliberate boundary rather than filing. Two Arduino libraries sit beside the sketch and are linked with `--library`: `quickjs-ng/` (the vendored engine) and `lv-binding-js-esp32/` (the bindings). Neither knows anything about this board.
+The split between the sketch and the binding library is a deliberate boundary rather than filing. Two Arduino libraries sit beside the sketch and are linked with `--library`: `quickjs-ng/` (the vendored engine) and `lvgl-js-bindings/` (the bindings). Neither knows anything about this board.
 
 Inside the binding library, one file owns correctness and the rest own vocabulary:
 
@@ -39,7 +39,7 @@ The rule that keeps the split honest: **a module never stores a `JSValue`.** Any
 
 Per-widget files were considered and rejected. `lv_binding_js` needs them because a React reconciler wants per-component prop diffing; here all nine widgets share one `apply_props`, so a widget is an enum value, a `switch` case, and a table row. Nine files of ten lines would be more structure describing less code.
 
-In the sketch, `JsHost.ino` owns the hardware and the process lifecycle: display bring-up, LVGL wiring, the script loader, the serial protocol, and the main loop. `js_fallback.h` holds the script baked into flash for when no `app.js` is found. The hardware headers (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) are verbatim copies from the C demo.
+In the sketch, `js-host.ino` owns the hardware and the process lifecycle: display bring-up, LVGL wiring, the script loader, the serial protocol, and the main loop. `js_fallback.h` holds the script baked into flash for when no `app.js` is found. The hardware headers (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) are verbatim copies from the C demo.
 
 Note the direction of the dependency. The bindings never reach into the sketch's globals; where they need something only the host knows, the host supplies it through `jsvm_host_fps()`, `jsvm_host_backlight()`, and `jsvm_host_battery()`, declared in the library header and defined in the `.ino`. Those three functions are the entire porting contract: bring LVGL up however a different board requires, implement them, and the binding library compiles unchanged.
 

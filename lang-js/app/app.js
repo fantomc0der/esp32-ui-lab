@@ -1,4 +1,4 @@
-// app.js — the C demo (lang-c/WaveshareVitals) recreated as data instead of
+// app.js — the C demo (lang-c/app) recreated as data instead of
 // firmware: the same 4-tab dashboard, now editable on a PC and hot-reloaded
 // with a long-press of BOOT. Tab-for-tab mirror of the C original:
 //   Vitals  — free-heap line chart, render-load arc gauge, uptime/battery

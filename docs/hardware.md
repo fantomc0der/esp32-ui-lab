@@ -15,7 +15,7 @@ What this board actually is, and every trap discovered while bringing it up. All
 
 ## Pinout
 
-Cross-checked across three sources (Waveshare wiki, their ESP-IDF BSP headers, and a working community sketch); per-pin citations live in [`board_pins.h`](../lang-c/WaveshareVitals/board_pins.h).
+Cross-checked across three sources (Waveshare wiki, their ESP-IDF BSP headers, and a working community sketch); per-pin citations live in [`board_pins.h`](../lang-c/app/board_pins.h).
 
 | Function | GPIO |
 |---|---|

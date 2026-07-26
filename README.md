@@ -1,6 +1,8 @@
-# waveshare-esp32
+# esp32-ui-lab
 
-Two implementations of the same touch UI for the **Waveshare ESP32-S3-Touch-LCD-1.47** (ESP32-S3R8, 1.47" IPS 172×320, JD9853 display, AXS5106L touch), one in C and one in JavaScript. Each `lang-*/` directory is self-contained, so they can be read, built, and flashed independently.
+Touch UIs for ESP32 displays: the same dashboard built twice, once compiled into C firmware and once as JavaScript you edit and hot-reload on the device without recompiling. Each `lang-*/` directory is self-contained, so they can be read, built, and flashed independently.
+
+**Hardware.** Everything here is developed and verified on a **Waveshare ESP32-S3-Touch-LCD-1.47** (ESP32-S3R8, 1.47" IPS 172×320, JD9853 controller, AXS5106L touch), which is the only board it has actually run on. That is a limit of what's been tested, not of the code. The JavaScript runtime is board-agnostic: it needs an ESP32 with PSRAM and any display LVGL can drive, at any resolution, and reaches hardware through three host hooks — what it does and doesn't require is in [`docs/lang-js/portability.md`](docs/lang-js/portability.md). The C demo is board-specific by nature; its pinout and driver notes are in [`docs/hardware.md`](docs/hardware.md).
 
 ## What's here
 

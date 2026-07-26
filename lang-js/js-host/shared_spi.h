@@ -28,6 +28,13 @@
 #include <SPI.h>
 #include <stdint.h>
 
+#include "board_config.h"
+
+// Only boards that actually share a peripheral need any of this. Guarding the
+// whole file also keeps the VSPI name out of builds for chips that do not define
+// it: the S3 exposes FSPI and HSPI only.
+#if BOARD_HAS_SD_SPI
+
 namespace shared_spi {
 
 // ONE SPIClass for the peripheral, shared by every device on it.
@@ -75,3 +82,5 @@ inline const void *owner() { return g_owner; }
 inline void invalidate() { g_owner = nullptr; }
 
 }  // namespace shared_spi
+
+#endif  // BOARD_HAS_SD_SPI

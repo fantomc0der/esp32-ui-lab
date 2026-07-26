@@ -1,1 +1,6 @@
 .omc/
+
+# arduino-cli output when a build is pointed somewhere with --build-path, which
+# is how the per-board build directories under lang-js/build/ get made. Roughly
+# 150 MB per sketch per board, and reproducible from source.
+build/

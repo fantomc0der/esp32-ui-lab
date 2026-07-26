@@ -18,7 +18,9 @@ Both libraries compile against the **sketch-local** `lv_conf.h`, because the ske
 
 ## Deploying app.js
 
-Flashing js-host is a one-time step; after that the UI is data, not firmware. The boot search order is `sd:/app.js` → `ffat:/app.js` → a built-in "no app.js found" fallback screen. Two ways to ship a script:
+Flashing js-host is a one-time step; after that the UI is data, not firmware. The board boots `/app.js` — the launcher — which lists `/apps/*.js` and runs whichever you tap. An app that is missing or throws falls back to the launcher, and a missing launcher falls back to a screen built into the firmware, so the panel is never dead. Paths prefer the SD card and fall back to the flash partition, so the same layout works with or without a card fitted.
+
+Two ways to ship a script:
 
 - **SD card:** copy [`lang-js/app/app.js`](../../lang-js/app/app.js) to the root of a FAT-formatted microSD, insert it, long-press **BOOT** (≥ 700 ms). The card is re-mounted on every reload, so it can be swapped while the board is powered, and it always wins over the flash partition.
 - **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. js-host writes the script to the internal FATFS partition and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
@@ -39,10 +41,14 @@ While js-host runs, the serial port accepts one line at a time:
 
 | Input | Effect |
 |---|---|
-| `reload` | tear down the JS world and re-read app.js from storage (same as BOOT long-press) |
-| `app-begin` … `app-end` | receive a script into `ffat:/app.js`, then reload (256 KB cap) |
-| `app-clear` | delete `ffat:/app.js` and reload (back to SD or the fallback) |
+| `home` | open the launcher (same as the on-screen home button, or a BOOT long-press) |
+| `reload` | restart the current app from storage |
+| `ls [dir]` | list a directory, default `/` |
+| `rm <path>` | delete a file |
+| `app-begin [path]` … `app-end` | receive a script and write it, then run it. With no path it replaces whatever is running, which is the usual edit loop; give a path to add a new app, e.g. `app-begin /apps/clock.js`. 256 KB cap |
 | anything else | evaluated as JavaScript in the running app; result or exception prints back |
+
+Paths are on the SD card, or on the flash partition with a `flash:` prefix.
 
 The REPL shares the app's global scope, so `sys.heap()`, poking widgets held in top-level `const`s, or arming a quick `lv.timer` all work live.
 

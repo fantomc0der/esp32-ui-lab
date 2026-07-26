@@ -25,8 +25,8 @@ Commits so far: `cd44c29` (fs + switching + home), `649bf5c` (wifi + fetch).
 ## Remaining
 
 - [x] **Deployed and verified** — all three apps upload, run, and switch cleanly; heap drift across 6 switches was 288 B internal / 140 B PSRAM.
-- [ ] **Extend `selftest.js`** for `fs.*`, `sys.launch`, `wifi.status`, textarea/keyboard.
-- [ ] **Docs** — `binding-api.md` (fs, fetch, wifi, textarea/keyboard, new fonts), `architecture.md` (the deferred-switch rule, worker-task pattern, `lv_layer_top` ownership), `build-and-deploy.md` (new serial commands: `home`, `ls`, `rm`, `app-begin <path>`).
+- [x] **selftest extended** — 53 checks, 0 failures on hardware.
+- [x] **Docs updated** — binding-api (fs/fetch/wifi/textarea/keyboard/fonts/apps), architecture (deferred switch + layer_top), build-and-deploy (new serial commands).
 - [ ] **Open the PR** against `main`.
 
 ## Needs the user (cannot be done from here)

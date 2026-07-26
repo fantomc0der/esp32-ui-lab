@@ -22,6 +22,8 @@ The full modern language is available (closures, template literals, BigInt, JSON
 | `lv.list(parent, props?)` | rows via `list.add(text)` |
 | `lv.chart(parent, props?)` | single-series line chart in shift mode, point dots hidden; feed it with `.push(n)` |
 | `lv.tabview(parent, props?)` | swipeable/tappable tabs; `bar` prop sets tab-bar height, `.addTab(name)` returns the tab's content container |
+| `lv.textarea(parent, props?)` | text field; `placeholder`, `password` (masks input), `oneLine`, `maxLength`. `.value()` reads and writes its text |
+| `lv.keyboard(parent, props?)` | on-screen keyboard; `.target(textarea)` routes typing into a field, and it emits `ready`/`cancel` for its tick and cross keys |
 | `lv.timer(ms, fn)` | LVGL timer; returns a handle with `.stop()`; 10 ms floor |
 
 ### Props
@@ -37,7 +39,7 @@ Accepted at creation and via `.set(props)`. Unknown keys are ignored (scripts sh
 | `x`, `y` | offsets with `align`, absolute position without |
 | `text` | labels and buttons |
 | `bg`, `color` | background / text color: `"#RRGGBB"` string or `0xRRGGBB` number |
-| `font` | `14`, `16`, or `20` (the three compiled-in montserrat sizes) |
+| `font` | `14`, `16`, `20`, `28`, or `40` (the compiled-in montserrat sizes) |
 | `range` | `[min, max]` for slider/arc, Y axis for chart |
 | `value` | number for slider/arc, boolean for switch |
 | `pad`, `radius` | style shorthands, pixels |
@@ -73,6 +75,32 @@ Fonts do not scale: the three sizes are fixed bitmaps compiled into the firmware
 - `.clean()` — deletes all children (their callbacks are released via the DELETE hooks)
 - `.bounds()` — `{ x, y, w, h }` of the content area in screen coordinates; combine with the `x, y` from a pointer event to place children under a finger
 
+## fs — files
+
+Paths are absolute. An unprefixed path uses the SD card, falling back to the flash partition when no card is fitted; a `flash:` prefix always means flash. Reads block the UI task and are capped at 256 KB, so this is for config, logs, and cached data rather than large media.
+
+`fs.read(path)` returns the contents or `null`; `fs.write(path, text)` and `fs.append(path, text)` return a boolean; `fs.exists`, `fs.remove`, `fs.mkdir`, and `fs.isDir` do what they say; `fs.list(dir)` returns an array of bare names (or `null` if it isn't a directory); `fs.available()` tells you whether any storage is mounted, so a script can degrade instead of throwing.
+
+## fetch — HTTP
+
+`fetch(url)` returns a `Promise` resolving to `{ status, ok, body }`, where `body` is the raw text. It rejects on transport failure, and throws immediately if there is no connection or another request is already in flight (one at a time). HTTPS works, without certificate validation. Bodies are capped at 128 KB.
+
+The request runs on a worker task, so a slow response never freezes rendering or touch, and your callback still arrives on the normal task like every other callback.
+
+```js
+const res = await fetch("https://api.example.com/thing");
+if (res.ok) label.set({ text: JSON.parse(res.body).value });
+```
+
+## wifi
+
+- `wifi.status()` → `{ connected, ssid, ip, rssi, saved }`. Deliberately never returns the password.
+- `wifi.save(ssid, password)` stores the credentials in NVS and connects. They survive reboots and reflashes, and the board rejoins on its own afterwards, including after a router restart.
+- `wifi.connect()` retries with what's stored; `wifi.forget()` clears it.
+- `wifi.scan(fn)` — async scan; `fn(nets)` gets `[{ ssid, rssi, open }, ...]` or `null`. Returns `false` if a scan is already running.
+
+Credentials are write-only by design: a script can set them but no API hands them back, so a script from a card can't read your network password off the device.
+
 ## sys
 
 - `sys.heap()` → `{ internal, psram }` free bytes
@@ -81,6 +109,20 @@ Fonts do not scale: the three sizes are fixed bitmaps compiled into the firmware
 - `sys.fps()` → panel flushes over the last 1 s window (host-measured)
 - `sys.backlight(pct)` → LEDC PWM, clamped 0–100, hardware floor keeps the panel faintly visible
 - `sys.info()` → `{ model, rev, cores, mhz, flashMB, psramMB, lvgl, quickjs }`
+- `sys.launch(path)` → asks the firmware to run a different script. It returns immediately and your app keeps running until the current call finishes; the switch happens after that. It cannot be synchronous, because tearing down the VM mid-call would free the function that is executing.
+
+## Apps and getting back
+
+The board boots `/app.js`, the launcher, which lists `/apps/*.js`. Any script can hand over with `sys.launch("/apps/other.js")`.
+
+You never have to provide a way back. The firmware draws a home button on LVGL's top layer, above whatever your app draws and outside the widget tree it can delete, and a long-press of BOOT does the same thing in hardware. It sits in the bottom-right corner, so leave that corner clear if you're placing something full-width along the bottom.
+
+One thing to know when building multi-screen apps: rebuilding the screen from inside a click handler deletes the widget LVGL is currently dispatching to. Defer it by a tick instead, which is what [`apps/wifi.js`](../../lang-js/app/apps/wifi.js) does:
+
+```js
+const next = fn => { const t = lv.timer(20, () => { t.stop(); fn(); }); };
+button.on("click", () => next(showOtherScreen));
+```
 
 ## wifi
 

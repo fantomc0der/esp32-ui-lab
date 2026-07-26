@@ -82,7 +82,7 @@ static JSValue js_fs_read(JSContext *ctx, JSValueConst, int argc, JSValueConst *
     return JS_ThrowRangeError(ctx, "file larger than the %u byte read limit",
                               (unsigned)kMaxRead);
   }
-  char *buf = static_cast<char *>(heap_caps_malloc(n + 1, MALLOC_CAP_SPIRAM));
+  char *buf = static_cast<char *>(heap_caps_malloc(n + 1, JS_HEAP_CAPS));
   if (!buf) {
     f.close();
     JS_FreeCString(ctx, raw);

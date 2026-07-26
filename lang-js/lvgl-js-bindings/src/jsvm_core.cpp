@@ -32,16 +32,33 @@ JSContext *jsvm_ctx = nullptr;
 JSClassID jsvm_widget_class = 0;
 static JSClassID g_timer_class = 0;
 
-static const size_t kJsMaxStack = 20 * 1024;  // loopTask stack is 32 KB
+// How much C stack QuickJS may use before it raises a stack-overflow error.
+//
+// This is a BUDGET AGAINST THE CALLING TASK'S STACK, not a free choice: QuickJS
+// sets stack_limit = (SP at JS_SetMaxStackSize) - this value, then fails any eval
+// whose SP drops below that. Set it too close to the task's actual stack size and
+// the limit lands below the real stack base, so js_check_stack_overflow() is true
+// on entry and EVERY eval fails instantly with a non-stringifiable InternalError
+// (seen as "[js] ERROR: null" on the very first 1+1).
+//
+// The host defines JS_MAX_STACK to suit its loop-task stack; 20 KB against the
+// 32 KB SET_LOOP_TASK_STACK_SIZE the Waveshare target uses. Keep a healthy margin.
+#ifndef JS_MAX_STACK
+#define JS_MAX_STACK (20 * 1024)
+#endif
+static const size_t kJsMaxStack = JS_MAX_STACK;
 
-// JS heap in PSRAM. usable_size must report 0: QuickJS treats it as writable
-// capacity, and with IDF heap poisoning heap_caps_get_allocated_size() counts
-// the tail canary in it — reporting real sizes corrupts the heap (proven on
-// hardware, see docs/lang-js/engine-notes.md).
-static void *qjs_calloc(void *, size_t n, size_t sz) { return heap_caps_calloc(n, sz, MALLOC_CAP_SPIRAM); }
-static void *qjs_malloc(void *, size_t sz) { return heap_caps_malloc(sz, MALLOC_CAP_SPIRAM); }
+// The JS heap comes from JS_HEAP_CAPS (jsvm_internal.h): PSRAM by default,
+// byte-addressable internal DRAM on boards without it.
+//
+// usable_size must report 0: QuickJS treats it as writable capacity, and with
+// IDF heap poisoning heap_caps_get_allocated_size() counts the tail canary in
+// it — reporting real sizes corrupts the heap (proven on hardware, see
+// docs/lang-js/engine-notes.md).
+static void *qjs_calloc(void *, size_t n, size_t sz) { return heap_caps_calloc(n, sz, JS_HEAP_CAPS); }
+static void *qjs_malloc(void *, size_t sz) { return heap_caps_malloc(sz, JS_HEAP_CAPS); }
 static void qjs_free(void *, void *p) { heap_caps_free(p); }
-static void *qjs_realloc(void *, void *p, size_t sz) { return heap_caps_realloc(p, sz, MALLOC_CAP_SPIRAM); }
+static void *qjs_realloc(void *, void *p, size_t sz) { return heap_caps_realloc(p, sz, JS_HEAP_CAPS); }
 static size_t qjs_usable_size(const void *) { return 0; }
 static const JSMallocFunctions kMallocFns = {qjs_calloc, qjs_malloc, qjs_free, qjs_realloc, qjs_usable_size};
 
@@ -52,6 +69,16 @@ void jsvm_report_exception() {
   const char *msg = JS_ToCString(jsvm_ctx, exc);
   Serial.printf("[js] ERROR: %s\n", msg ? msg : "(unprintable)");
   JS_FreeCString(jsvm_ctx, msg);
+
+  // A thrown null/undefined is not a script error: QuickJS reports an internal
+  // allocation failure that way, with no Error object and no stack. Say so and
+  // print the heap, because "ERROR: null" alone reads like a script bug and
+  // sends you looking in entirely the wrong place.
+  if (JS_IsNull(exc) || JS_IsUndefined(exc)) {
+    Serial.printf("[js]   (no Error object — usually allocation failure; %u bytes free, largest block %u)\n",
+                  heap_caps_get_free_size(JS_HEAP_CAPS),
+                  heap_caps_get_largest_free_block(JS_HEAP_CAPS));
+  }
   if (JS_IsObject(exc)) {
     JSValue stack = JS_GetPropertyStr(jsvm_ctx, exc, "stack");
     if (JS_IsString(stack)) {
@@ -254,6 +281,38 @@ JSValue jsvm_create_timer(JSContext *ctx, int32_t ms, JSValueConst fn) {
 static const JSClassDef kWidgetClassDef = { "LvWidget", nullptr, nullptr, nullptr, nullptr };
 static const JSClassDef kTimerClassDef = { "LvTimer", nullptr, nullptr, nullptr, nullptr };
 
+// Builds the JS context. JS_NewContext() loads twelve intrinsic groups whether a
+// script wants them or not, and on a board without PSRAM that startup cost is
+// most of the available heap. JS_LEAN_CONTEXT builds the context from
+// JS_NewContextRaw() plus only the groups the shipped scripts actually use.
+//
+// What the scripts in app/ use, verified by grep before choosing this list:
+//   BaseObjects  Object/Array/String/Error — not optional
+//   Eval         JS_Eval itself needs it
+//   JSON         weather.js parses its API response and its disk cache
+//   Promise      vitals.js, weather.js, selftest.js use async/await
+//   MapSet       wifi.js keeps a Set of seen SSIDs
+//   RegExp       not used by any app, but String.prototype.split/replace with a
+//                string arg still routes through it internally, so it stays
+//
+// Dropped: Date, Proxy, TypedArrays, WeakRef, AToB, Performance. If a script
+// needs one later, add it here rather than reaching for JS_NewContext.
+static JSContext *new_context(JSRuntime *rt) {
+#if JS_LEAN_CONTEXT
+  JSContext *ctx = JS_NewContextRaw(rt);
+  if (!ctx) return nullptr;
+  if (JS_AddIntrinsicBaseObjects(ctx) || JS_AddIntrinsicEval(ctx) ||
+      JS_AddIntrinsicRegExp(ctx) || JS_AddIntrinsicJSON(ctx) ||
+      JS_AddIntrinsicMapSet(ctx) || JS_AddIntrinsicPromise(ctx)) {
+    JS_FreeContext(ctx);
+    return nullptr;
+  }
+  return ctx;
+#else
+  return JS_NewContext(rt);
+#endif
+}
+
 static void install_core_globals(JSContext *ctx) {
   JSValue global = JS_GetGlobalObject(ctx);
 
@@ -277,12 +336,24 @@ bool jsvm_running() { return jsvm_ctx != nullptr; }
 bool jsvm_start(const char *src, const char *filename) {
   if (g_rt) jsvm_stop();
 
+  // Report the pool the VM actually draws from, since that is what determines
+  // whether startup can succeed. A bare "failed" here is very hard to act on:
+  // on a PSRAM-less board the usual cause is simply not enough free memory
+  // after LVGL and the WiFi stack have taken theirs.
+  const uint32_t heap_before = heap_caps_get_free_size(JS_HEAP_CAPS);
+
   g_rt = JS_NewRuntime2(&kMallocFns, nullptr);
-  if (!g_rt) { Serial.println("[js] runtime creation failed"); return false; }
+  if (!g_rt) {
+    Serial.printf("[js] runtime creation failed (%u bytes free, largest block %u)\n",
+                  heap_before, heap_caps_get_largest_free_block(JS_HEAP_CAPS));
+    return false;
+  }
   JS_SetMaxStackSize(g_rt, kJsMaxStack);
-  jsvm_ctx = JS_NewContext(g_rt);
+  jsvm_ctx = new_context(g_rt);
   if (!jsvm_ctx) {
-    Serial.println("[js] context creation failed");
+    Serial.printf("[js] context creation failed (%u bytes free at start, %u now, largest block %u)\n",
+                  heap_before, heap_caps_get_free_size(JS_HEAP_CAPS),
+                  heap_caps_get_largest_free_block(JS_HEAP_CAPS));
     JS_FreeRuntime(g_rt);
     g_rt = nullptr;
     return false;
@@ -305,6 +376,13 @@ bool jsvm_start(const char *src, const char *filename) {
 #if JSVM_WITH_WIFI
   js_install_wifi(jsvm_ctx);
 #endif
+
+  // What the VM cost to stand up, and what a script has left to work with. On a
+  // PSRAM-less board this is the difference between "runs" and "runs anything
+  // useful", so it is worth a line every boot.
+  Serial.printf("[js] vm ready: %u bytes to start, %u free for scripts\n",
+                heap_before - heap_caps_get_free_size(JS_HEAP_CAPS),
+                heap_caps_get_free_size(JS_HEAP_CAPS));
 
   const uint32_t t0 = millis();
   JSValue r = JS_Eval(jsvm_ctx, src, strlen(src), filename, JS_EVAL_TYPE_GLOBAL);

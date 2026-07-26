@@ -14,10 +14,31 @@
 // failing cleanly (see docs/lang-js/architecture.md).
 #pragma once
 
+#include <esp_heap_caps.h>
 #include <lvgl.h>
 
 #include "js_bindings.h"
 #include "quickjs.h"
+
+// ---------------------------------------------------------------- memory source
+// Where big buffers come from: script text, fetch response bodies, the JS heap.
+// PSRAM by default; a board without it overrides this with -DJS_HEAP_CAPS=...
+//
+// A PSRAM-less board must pass MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA rather than
+// bare MALLOC_CAP_INTERNAL. On a classic ESP32 the latter can hand back IRAM
+// (0x400xxxxx), which allows only aligned 32-bit access, and QuickJS writes
+// bytes and shorts all over its heap — that panics with LoadStoreError inside
+// JS_NewRuntime2. The DMA cap guarantees byte-addressable DRAM.
+#ifndef JS_HEAP_CAPS
+#define JS_HEAP_CAPS MALLOC_CAP_SPIRAM
+#endif
+
+// Build the JS context from only the intrinsics the shipped scripts use, instead
+// of the twelve groups JS_NewContext() always loads. Off by default: a board with
+// PSRAM has no reason to give up language surface. See new_context().
+#ifndef JS_LEAN_CONTEXT
+#define JS_LEAN_CONTEXT 0
+#endif
 
 // ---------------------------------------------------------------- live context
 // Valid only between jsvm_start() and jsvm_stop(); null otherwise.

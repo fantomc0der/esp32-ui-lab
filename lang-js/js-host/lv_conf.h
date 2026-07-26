@@ -68,8 +68,17 @@
 #define LV_STDARG_INCLUDE       <stdarg.h>
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
-    /** Size of memory available for `lv_malloc()` in bytes (>= 2kB) */
-    #define LV_MEM_SIZE (48 * 1024U) /**< [bytes] */
+    /** Size of memory available for `lv_malloc()` in bytes (>= 2kB)
+     *
+     * This is a STATIC pool: it lands in .bss and is carved out of the same
+     * internal SRAM the JS heap needs, so on a board without PSRAM it competes
+     * directly with QuickJS. BOARD_LV_MEM_KB (passed by flash.ps1 per target)
+     * shrinks it where that matters; boards with PSRAM keep the stock 48 kB.
+     */
+    #ifndef BOARD_LV_MEM_KB
+        #define BOARD_LV_MEM_KB 48
+    #endif
+    #define LV_MEM_SIZE (BOARD_LV_MEM_KB * 1024U) /**< [bytes] */
 
     /** Size of the memory expand for `lv_malloc()` in bytes */
     #define LV_MEM_POOL_EXPAND_SIZE 0

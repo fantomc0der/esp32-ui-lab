@@ -312,7 +312,7 @@ static void fetch_worker(void *arg) {
         if (body.length() > kMaxBody) {
           r->status = kErrTooLarge;
         } else {
-          r->body = static_cast<char *>(heap_caps_malloc(body.length() + 1, MALLOC_CAP_SPIRAM));
+          r->body = static_cast<char *>(heap_caps_malloc(body.length() + 1, JS_HEAP_CAPS));
           if (r->body) {
             memcpy(r->body, body.c_str(), body.length() + 1);
             r->len = body.length();

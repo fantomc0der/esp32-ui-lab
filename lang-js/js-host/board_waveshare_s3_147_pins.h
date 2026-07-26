@@ -1,4 +1,4 @@
-// board_pins.h — Waveshare ESP32-S3-Touch-LCD-1.47 pin map
+// board_waveshare_s3_147_pins.h — Waveshare ESP32-S3-Touch-LCD-1.47 pin map
 //
 // Sources (cross-checked, two independent origins):
 //   1. Waveshare official wiki, "01_gfx_helloworld" code analysis:

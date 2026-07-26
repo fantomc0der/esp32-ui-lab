@@ -1,1 +1,4 @@
 .omc/
+
+# Per-target arduino-cli build output (lang-js/flash.ps1 -Target).
+lang-js/build/

@@ -13,15 +13,17 @@
 //
 // Deliberate difference from the vendor driver: that one arms a FALLING
 // interrupt on the INT pin and only reads when the ISR fires. Our sources
-// disagree about which physical pin is INT vs RST (see board_pins.h), so we
+// disagree about which physical pin is INT vs RST (see the pin header), so we
 // poll reg 0x01 instead. Costs one ~200us I2C transaction per UI frame, and
 // removes the dependency on getting the INT pin right.
 
-#include "axs5106l_touch.h"
+#include "board_config.h"
+
+#if BOARD_TOUCH_AXS5106L
 
 #include <Wire.h>
 
-#include "board_pins.h"
+#include "touch.h"
 
 namespace {
 
@@ -107,3 +109,5 @@ bool touch_read(uint16_t *x, uint16_t *y) {
   *y = sy;
   return true;
 }
+
+#endif  // BOARD_TOUCH_AXS5106L

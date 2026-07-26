@@ -25,39 +25,41 @@
 
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
-#include <FFat.h>
-#include <SD_MMC.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <lvgl.h>
 
 #include <js_bindings.h>
 
-#include "axs5106l_touch.h"
-#include "board_pins.h"
-#include "jd9853_panel.h"
+#include "board_config.h"
+#include "board_display.h"
+#include "board_storage.h"
 #include "js_fallback.h"
+#include "touch.h"
 
 // QuickJS recurses on the C stack; the default 8 KB loopTask stack is too
-// small. The VM's own limit (js_bindings.cpp) stays well under this.
-SET_LOOP_TASK_STACK_SIZE(32 * 1024);
+// small. The VM's own limit (JS_MAX_STACK, passed by flash.ps1) must stay well
+// under this — QuickJS derives its overflow threshold by subtracting that limit
+// from the current stack pointer, so a limit close to the real stack size makes
+// every eval fail on entry.
+SET_LOOP_TASK_STACK_SIZE(BOARD_LOOP_STACK_KB * 1024);
 
 // ---------------------------------------------------------------- display stack
-// Identical to lang-c/app — see that sketch and docs/lang-c/ for
-// the reasoning behind every constant here.
+// The panel-specific parts (which controller, what offsets, how it resets) live
+// in board_display.h. On the Waveshare target those constants are identical to
+// lang-c/app — see that sketch and docs/lang-c/ for the reasoning behind them.
 
-Arduino_DataBus *bus =
-    new Arduino_ESP32SPI(LCD_PIN_DC, LCD_PIN_CS, LCD_PIN_SCK, LCD_PIN_MOSI);
-
-Arduino_GFX *gfx = new Arduino_ST7789(
-    bus, GFX_NOT_DEFINED /* RST handled manually */, 0, true /* IPS */,
-    LCD_NATIVE_W, LCD_NATIVE_H, LCD_COL_OFFSET, LCD_ROW_OFFSET, LCD_COL_OFFSET,
-    LCD_ROW_OFFSET);
+Arduino_DataBus *bus = board_make_bus();
+Arduino_GFX *gfx = board_make_gfx(bus);
 
 // RGB565 = 2 bytes/px on the wire; never size buffers with sizeof(lv_color_t)
 // (3 in LVGL 9).
 static constexpr uint32_t kBytesPerPx = 2;
-static constexpr uint32_t kBufBytes = SCREEN_W * (SCREEN_H / 8) * kBytesPerPx;
+// Buffer height is a fraction of the screen, set per target: bigger buffers mean
+// fewer flush calls, smaller ones leave more RAM for the JS heap. Boards without
+// PSRAM trade FPS for that headroom.
+static constexpr uint32_t kBufBytes =
+    SCREEN_W * (SCREEN_H / BOARD_DRAW_BUF_DIVISOR) * kBytesPerPx;
 static uint8_t *lv_buf_a = nullptr;
 static uint8_t *lv_buf_b = nullptr;
 
@@ -103,23 +105,31 @@ static void setBacklight(uint8_t percent) {
 uint32_t jsvm_host_fps() { return fps_value; }
 void jsvm_host_backlight(uint8_t percent) { setBacklight(percent); }
 
-// This board halves the battery rail before the ADC. GPIO12 is an ADC2
-// channel, and the WiFi driver arbitrates ADC2, so a 0 reading means
-// "unavailable" rather than "flat"; NAN reaches scripts as null.
+// Battery sense exists only on boards wired for it. NAN reaches scripts as
+// null, which is also what a board without the circuit reports.
 float jsvm_host_battery() {
+#if BOARD_HAS_BATTERY
+  // This board halves the battery rail before the ADC. GPIO12 is an ADC2
+  // channel, and the WiFi driver arbitrates ADC2, so a 0 reading means
+  // "unavailable" rather than "flat".
   const uint32_t mv = analogReadMilliVolts(BAT_PIN);
   if (mv == 0) return NAN;
   return (mv * 2.0f) / 1000.0f;
+#else
+  return NAN;
+#endif
 }
 
 // ---------------------------------------------------------------- script loading
 
-// Reads a whole file into a PSRAM buffer (caller frees). nullptr on any miss.
+// Reads a whole file into a bulk buffer (caller frees). nullptr on any miss.
+// BOARD_BULK_CAPS is PSRAM where there is any and byte-addressable internal
+// DRAM where there is not.
 static char *readAll(fs::FS &fs, const char *path) {
   File f = fs.open(path, FILE_READ);
   if (!f || f.isDirectory()) return nullptr;
   const size_t n = f.size();
-  char *buf = static_cast<char *>(heap_caps_malloc(n + 1, MALLOC_CAP_SPIRAM));
+  char *buf = static_cast<char *>(heap_caps_malloc(n + 1, BOARD_BULK_CAPS));
   if (!buf) { f.close(); return nullptr; }
   const size_t got = f.read(reinterpret_cast<uint8_t *>(buf), n);
   f.close();
@@ -131,8 +141,6 @@ static char *readAll(fs::FS &fs, const char *path) {
 // from it, and it is where a failed app lands you.
 static const char *kLauncher = "/app.js";
 
-static bool g_sd_ok = false;
-static bool g_flash_ok = false;
 static char g_current_app[128] = "";
 static char g_next_app[128] = "";
 static lv_obj_t *g_home_btn = nullptr;
@@ -150,11 +158,14 @@ static void requestApp(const char *path) {
 // card and falls back to flash, so the same script paths work whether or not a
 // card is fitted.
 static char *loadScript(const char *path) {
+  fs::FS *sd = board_storage::sd();
+  fs::FS *flash = board_storage::flash();
+
   if (strncmp(path, "flash:", 6) == 0) {
-    return g_flash_ok ? readAll(FFat, path + 6) : nullptr;
+    return flash ? readAll(*flash, path + 6) : nullptr;
   }
-  char *src = g_sd_ok ? readAll(SD_MMC, path) : nullptr;
-  if (!src && g_flash_ok) src = readAll(FFat, path);
+  char *src = sd ? readAll(*sd, path) : nullptr;
+  if (!src && flash) src = readAll(*flash, path);
   return src;
 }
 
@@ -232,40 +243,42 @@ void setup() {
   delay(200);
   Serial.println("\n[boot] js-host starting");
 
-  pinMode(LCD_PIN_BL, OUTPUT);
-  analogWrite(LCD_PIN_BL, 0);  // no garbage RAM on the panel during init
+  Serial.printf("[boot] board: %s\n", BOARD_NAME);
+  Serial.printf("[mem] start                 %u free, %u largest\n",
+                heap_caps_get_free_size(JS_HEAP_CAPS),
+                heap_caps_get_largest_free_block(JS_HEAP_CAPS));
 
-  pinMode(LCD_PIN_RST, OUTPUT);
-  digitalWrite(LCD_PIN_RST, LOW);
-  delay(20);
-  digitalWrite(LCD_PIN_RST, HIGH);
-  delay(150);
-
-  if (!gfx->begin(40000000L)) {
+  if (!board_display_begin()) {
     Serial.println("[boot] gfx->begin() FAILED — halting");
     while (true) delay(1000);
   }
-  jd9853_init(bus);
-  gfx->setRotation(LCD_ROTATION);
   gfx->fillScreen(RGB565_BLACK);
   Serial.printf("[boot] display %dx%d\n", gfx->width(), gfx->height());
 
+#if BOARD_TOUCH_AXS5106L
+  // Capacitive part on I2C; the SPI touch driver brings up its own bus.
   Wire.begin(TOUCH_PIN_SDA, TOUCH_PIN_SCL);
   Wire.setClock(400000);
-  touch_begin();
+#endif
+  Serial.printf("[boot] touch %s\n", touch_begin() ? "ok" : "not detected");
 
   // Radio up so wifi.scan() works even before anything is configured. Joining
   // a saved network waits until after LVGL exists, further down: the binding
   // supervises reconnection with an lv_timer, which cannot be created yet.
   WiFi.mode(WIFI_STA);
+  Serial.printf("[mem] after WiFi.mode         %u free, %u largest\n",
+                heap_caps_get_free_size(JS_HEAP_CAPS),
+                heap_caps_get_largest_free_block(JS_HEAP_CAPS));
 
   lv_init();
   lv_tick_set_cb(lv_tick_cb);
 
   lv_buf_a = static_cast<uint8_t *>(
       heap_caps_malloc(kBufBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+#if BOARD_DOUBLE_BUFFER
   lv_buf_b = static_cast<uint8_t *>(
       heap_caps_malloc(kBufBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+#endif
   if (lv_buf_a == nullptr) {
     Serial.println("[boot] draw buffer alloc FAILED — halting");
     while (true) delay(1000);
@@ -279,15 +292,28 @@ void setup() {
   lv_indev_t *touch_indev = lv_indev_create();
   lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(touch_indev, lv_touch_cb);
+  Serial.printf("[mem] after LVGL              %u free, %u largest\n",
+                heap_caps_get_free_size(JS_HEAP_CAPS),
+                heap_caps_get_largest_free_block(JS_HEAP_CAPS));
 
   // Storage is mounted once and kept, which is what lets scripts have a real
   // filesystem. The tradeoff is hot-swapping: changing cards now needs a reset.
-  SD_MMC.setPins(SD_PIN_CLK, SD_PIN_CMD, SD_PIN_D0, SD_PIN_D1, SD_PIN_D2, SD_PIN_D3);
-  g_sd_ok = SD_MMC.begin("/sdcard", false /* 4-bit */) && SD_MMC.cardType() != CARD_NONE;
-  g_flash_ok = FFat.begin(true /* format on first use */);
+  board_storage::begin();
   Serial.printf("[boot] storage: sd %s, flash %s\n",
-                g_sd_ok ? "ok" : "none", g_flash_ok ? "ok" : "none");
-  jsvm_set_filesystem(g_sd_ok ? &SD_MMC : nullptr, g_flash_ok ? &FFat : nullptr);
+                board_storage::sd() ? "ok" : "none",
+                board_storage::flash() ? "ok" : BOARD_HAS_FATFS ? "none" : "n/a");
+  Serial.printf("[mem] after storage           %u free, %u largest\n",
+                heap_caps_get_free_size(JS_HEAP_CAPS),
+                heap_caps_get_largest_free_block(JS_HEAP_CAPS));
+  jsvm_set_filesystem(board_storage::sd(), board_storage::flash());
+
+  // Memory left for the JS heap once the display, storage and radio have taken
+  // theirs. On a PSRAM-less board this is the number that decides whether the
+  // VM can start at all, so it is worth printing every boot rather than only
+  // when something fails.
+  Serial.printf("[boot] js heap pool: %u bytes free, largest block %u\n",
+                heap_caps_get_free_size(JS_HEAP_CAPS),
+                heap_caps_get_largest_free_block(JS_HEAP_CAPS));
 
   createHomeButton();
 
@@ -308,11 +334,11 @@ void setup() {
 static fs::FS *resolveFs(const char *path, const char **out_path) {
   if (strncmp(path, "flash:", 6) == 0) {
     *out_path = path + 6;
-    return g_flash_ok ? static_cast<fs::FS *>(&FFat) : nullptr;
+    return board_storage::flash();  // nullptr on boards with no script partition
   }
   *out_path = path;
-  if (g_sd_ok) return static_cast<fs::FS *>(&SD_MMC);
-  return g_flash_ok ? static_cast<fs::FS *>(&FFat) : nullptr;
+  fs::FS *sd = board_storage::sd();
+  return sd ? sd : board_storage::flash();
 }
 
 static bool writeScript(const char *path, const String &text) {
@@ -335,11 +361,21 @@ static bool writeScript(const char *path, const String &text) {
 //   app-begin [path]           start receiving a script; defaults to whatever
 //     ...lines...              is running now, so the usual edit loop is just
 //   app-end                    app-begin / paste / app-end, then it reloads
+// REPL state. These live at file scope rather than as function-local statics on
+// purpose: a local static with a non-trivial constructor gets a thread-safe
+// initialisation guard (__cxa_guard_acquire), and that guard calls abort() on
+// this build — a reset loop the moment the REPL is first polled. File-scope
+// objects are constructed before main() and need no guard.
+static String g_repl_line;
+static String g_repl_upload;
+static String g_repl_upload_path;
+static bool g_repl_uploading = false;
+
 static void pollSerialRepl() {
-  static String line;
-  static String upload;
-  static String upload_path;
-  static bool uploading = false;
+  String &line = g_repl_line;
+  String &upload = g_repl_upload;
+  String &upload_path = g_repl_upload_path;
+  bool &uploading = g_repl_uploading;
   // Caps so a hostile/broken sender can't grow these Strings until the
   // internal heap dies: REPL lines beyond 4 KB are discarded, uploads beyond
   // 256 KB abort the transfer.

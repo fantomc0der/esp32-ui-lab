@@ -70,7 +70,7 @@ $p.Close(); $buf
 [boot] ready
 ```
 
-Anything else, see the troubleshooting table in the C-way [README](../../lang-c/README.md). Reopen the serial monitor after each reset — native USB re-enumerates and the old handle dies.
+Anything else, see the troubleshooting table in the [`lang-c/` README](../../lang-c/README.md). Reopen the serial monitor after each reset — native USB re-enumerates and the old handle dies.
 
 ## Build stats (final verified build)
 

@@ -1,0 +1,67 @@
+// js_bindings.h — public interface of the QuickJS <-> LVGL binding layer.
+//
+// This library knows about LVGL, QuickJS-ng, and the ESP32 Arduino core. It
+// knows nothing about any particular board: everything board-specific reaches
+// it through the host hooks at the bottom of this file. To run it on different
+// hardware, bring LVGL up however that board requires, implement the three
+// hooks, and call jsvm_start().
+//
+// THREADING: every function here must be called from the same task that runs
+// lv_timer_handler() (loopTask under the Arduino core), and no other task may
+// touch the VM or LVGL. That single-task rule is what makes the whole design
+// lock-free; violating it corrupts memory rather than failing cleanly. To feed
+// the VM from an async network callback, queue the payload there and drain the
+// queue from the LVGL task. See docs/lang-js/architecture.md.
+#pragma once
+
+#include <Arduino.h>
+
+// Optional modules, on by default. Define to 0 in your sketch's build_opt.h to
+// leave one out of the build entirely (e.g. -DJSVM_WITH_WIFI=0 on a board with
+// no radio, which also drops WiFi.h from the firmware). The `lv` and `console`
+// globals are core and always present.
+#ifndef JSVM_WITH_SYS
+#define JSVM_WITH_SYS 1
+#endif
+#ifndef JSVM_WITH_WIFI
+#define JSVM_WITH_WIFI 1
+#endif
+
+// Creates a runtime and context (JS heap in PSRAM), installs the lv/sys/wifi/
+// console globals, and evaluates src. Any previously running script is torn
+// down first. Returns false if evaluation threw, in which case the exception
+// has been reported to Serial and whatever partial UI the script built is
+// still on screen — call jsvm_stop() before starting a replacement. filename
+// only labels exceptions and log lines.
+bool jsvm_start(const char *src, const char *filename);
+
+// Tears the JS world down in the only safe order: the WiFi scan and JS-owned
+// lv_timers first (they can re-enter the VM), then lv_obj_clean(screen) so the
+// LV_EVENT_DELETE hooks release per-widget callbacks while the context is
+// still alive, then any bindings left on the screen object itself, then the
+// context and runtime. Safe to call when nothing is running.
+void jsvm_stop();
+
+bool jsvm_running();
+
+// Evaluates one line in the running context and prints the result, or the
+// exception, to Serial. No-op when the VM is down.
+void jsvm_repl_line(const char *src);
+
+// Runs QuickJS's pending-job queue (promise reactions, async/await
+// continuations). quickjs-libc's event loop normally does this; without your
+// own pump a .then() callback would never fire. Call once per loop().
+void jsvm_pump();
+
+// ---- host hooks: implement these in your sketch -----------------------------
+// These are what sys.fps(), sys.backlight() and sys.battery() call.
+
+// Frames pushed to the panel in the last second; return 0 if you don't track it.
+uint32_t jsvm_host_fps();
+
+// Set panel backlight, 0-100. Already clamped to that range.
+void jsvm_host_backlight(uint8_t percent);
+
+// Battery voltage, or NAN when unavailable (no divider fitted, or the ADC is
+// busy). NAN surfaces to scripts as null.
+float jsvm_host_battery();

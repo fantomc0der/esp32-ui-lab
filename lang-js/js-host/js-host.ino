@@ -254,13 +254,10 @@ void setup() {
   Wire.setClock(400000);
   touch_begin();
 
-  // Radio up so wifi.scan() works even before anything is configured; if a
-  // script has saved credentials, rejoin that network now. Staying joined
-  // afterwards is handled inside the binding's event handler.
+  // Radio up so wifi.scan() works even before anything is configured. Joining
+  // a saved network waits until after LVGL exists, further down: the binding
+  // supervises reconnection with an lv_timer, which cannot be created yet.
   WiFi.mode(WIFI_STA);
-  if (!jsvm_wifi_autoconnect()) {
-    Serial.println("[wifi] no saved network — use the Wifi app or wifi.save()");
-  }
 
   lv_init();
   lv_tick_set_cb(lv_tick_cb);
@@ -293,6 +290,12 @@ void setup() {
   jsvm_set_filesystem(g_sd_ok ? &SD_MMC : nullptr, g_flash_ok ? &FFat : nullptr);
 
   createHomeButton();
+
+  // Safe here: LVGL exists, so the binding can create its reconnect timer.
+  if (!jsvm_wifi_autoconnect()) {
+    Serial.println("[wifi] no saved network — use the Wifi app or wifi.save()");
+  }
+
   runApp(kLauncher);
 
   fps_window_start = millis();

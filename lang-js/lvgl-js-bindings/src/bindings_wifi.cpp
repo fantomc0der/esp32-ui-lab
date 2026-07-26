@@ -35,24 +35,72 @@ static bool g_events_hooked = false;
 // Cleared by wifi.forget() so the reconnect handler stops fighting the user.
 static bool g_want_connection = false;
 
-static void wifi_event(WiFiEvent_t event) {
+// Retrying is supervised from an lv_timer rather than driven straight from the
+// WiFi event, for two reasons. Events arrive on the system event task, so
+// creating or touching anything LVGL owns from there would break the
+// single-task rule. And reconnecting the instant a disconnect arrives turns a
+// wrong password into a continuous spin — the driver fails, fires the event,
+// and we immediately ask again. The handler therefore only records what
+// happened; the timer, on the LVGL task, decides when to try again.
+static volatile uint8_t g_last_reason = 0;
+static uint32_t g_next_attempt = 0;
+static uint8_t g_attempts = 0;
+static lv_timer_t *g_supervisor = nullptr;
+
+// The distinction that matters when nothing connects: a typo versus a network
+// that isn't there.
+static const char *reason_name(uint8_t r) {
+  switch (r) {
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_AUTH_EXPIRE:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: return "wrong password";
+    case WIFI_REASON_NO_AP_FOUND:            return "network not found";
+    case WIFI_REASON_ASSOC_FAIL:             return "association failed";
+    case WIFI_REASON_BEACON_TIMEOUT:         return "lost the access point";
+    default:                                 return "disconnected";
+  }
+}
+
+static void wifi_event(WiFiEvent_t event, WiFiEventInfo_t info) {
   switch (event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       Serial.printf("[wifi] connected, ip %s\n", WiFi.localIP().toString().c_str());
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      // The ESP32 does not retry on its own: a router reboot or an expired
-      // DHCP lease leaves it off the network forever unless something asks
-      // again. This is the difference between working for an afternoon and
-      // working for months.
-      if (g_want_connection) {
-        Serial.println("[wifi] disconnected, retrying");
-        WiFi.reconnect();
-      }
+      // Recorded only. Acting on it here would mean both touching LVGL from
+      // the wrong task and retrying with no delay.
+      g_last_reason = info.wifi_sta_disconnected.reason;
       break;
     default:
       break;
   }
+}
+
+// Runs on the LVGL task. The ESP32 does not retry on its own — a router reboot
+// or an expired DHCP lease otherwise leaves it off the network indefinitely —
+// so this keeps asking, with a widening gap so a permanent failure costs an
+// occasional line rather than a flood.
+static void supervise(lv_timer_t *) {
+  if (!g_want_connection) return;
+  if (WiFi.status() == WL_CONNECTED) {
+    g_attempts = 0;
+    return;
+  }
+  const uint32_t now = millis();
+  if (now < g_next_attempt) return;
+
+  const uint8_t shift = g_attempts < 5 ? g_attempts : 5;
+  uint32_t backoff = 2000u << shift;   // 2s, 4s, 8s, 16s, 32s, then 64s
+  if (backoff > 60000u) backoff = 60000u;
+  g_next_attempt = now + backoff;
+
+  // Keep retrying forever (the network may come back) but stop narrating it.
+  if (g_attempts < 10) {
+    Serial.printf("[wifi] %s — attempt %u, next in %lus\n", reason_name(g_last_reason),
+                  g_attempts + 1, (unsigned long)(backoff / 1000));
+  }
+  g_attempts++;
+  WiFi.reconnect();
 }
 
 static void ensure_events() {
@@ -61,11 +109,17 @@ static void ensure_events() {
   g_events_hooked = true;
 }
 
+// Must be called after lv_init(): it creates the supervisor timer. The
+// supervisor deliberately outlives app teardown, since the connection should
+// survive switching apps; it touches only WiFi and Serial, never the VM.
 static void start_connection(const char *ssid, const char *pass) {
   ensure_events();
   g_want_connection = true;
+  g_attempts = 0;
+  g_next_attempt = millis() + 2000;  // let the initial begin() settle first
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
+  if (!g_supervisor) g_supervisor = lv_timer_create(supervise, 1000, nullptr);
 }
 
 // Joins with whatever is stored. Safe when nothing is; returns false then.

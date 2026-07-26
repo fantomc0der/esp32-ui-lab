@@ -75,7 +75,9 @@ jobs:
 
       - name: Install the core and libraries
         run: |
-          arduino-cli config init
+          # --overwrite because the cache restores a config from the previous
+          # run, and a bare `config init` exits 1 when one already exists.
+          arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls \
             https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index

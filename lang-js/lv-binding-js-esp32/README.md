@@ -4,9 +4,27 @@ Script an [LVGL 9](https://lvgl.io) UI in JavaScript on the ESP32, using a Quick
 
 > Independent implementation, **not** a port of and not affiliated with [lvgl/lv_binding_js](https://github.com/lvgl/lv_binding_js). That project targets embedded Linux and depends on libuv, curl, and txiki.js, none of which fit a FreeRTOS microcontroller. This library keeps the same idea (engine in firmware, hand-written bindings over LVGL's C API, scripts as data) and drops the POSIX layers. The full comparison is in [`docs/lang-js/design-rationale.md`](../../docs/lang-js/design-rationale.md).
 
+**There is no JSX, no React, and no virtual DOM here** — that is the other half of what was dropped. Scripts are plain imperative JavaScript that build widgets directly:
+
+```js
+const btn = lv.button(lv.screen(), { text: "Scan", w: 84, align: "top-left" });
+btn.on("click", () => console.log("tapped"));
+```
+
 ## What scripts get
 
-A curated LVGL surface, about twenty functions: `lv.screen()`, nine widget constructors (`obj`, `button`, `label`, `slider`, `switch`, `arc`, `list`, `chart`, `tabview`), a props object for size, alignment, colors, fonts, ranges and styling, `.on()` for click/change/press/pressing events, `.value()`, `.bounds()`, `.clean()`, `lv.timer()`, plus `sys` (heap, battery, uptime, fps, backlight, chip info), `wifi.scan()`, and `console.log`. Promises and `async`/`await` work. Full reference: [`docs/lang-js/binding-api.md`](../../docs/lang-js/binding-api.md).
+| | |
+|---|---|
+| Widgets | `lv.obj`, `lv.button`, `lv.label`, `lv.slider`, `lv.switch`, `lv.arc`, `lv.list`, `lv.chart`, `lv.tabview`, plus `lv.screen()` for the root |
+| Props | size (px, `"50%"`, `"content"`), `align`/`x`/`y`, `flex`/`flexAlign`, text, colors, font, `range`, `value`, padding, borders, and a few per-widget extras |
+| Methods | `.set()`, `.on()` (click, change, press, pressing), `.value()`, `.bounds()`, `.clean()`, plus `.add()`, `.addTab()`, `.push()` on the widgets that take them |
+| Timers | `lv.timer(ms, fn)`, returning a handle with `.stop()` |
+| Device | `sys` (heap, battery, uptime, fps, backlight, chip info), `wifi.scan()`, `console.log` |
+| Language | full ES2023 including closures, `JSON`, `Promise`, `async`/`await` |
+
+Full reference with every prop and its accepted values: [`docs/lang-js/binding-api.md`](../../docs/lang-js/binding-api.md).
+
+Anything not in that list has to be added to the binding layer in C before a script can reach it — that is the cost of a hand-written binding rather than a generated one. Adding a widget is about three lines; [`docs/lang-js/architecture.md`](../../docs/lang-js/architecture.md) has the recipes.
 
 ## Requirements
 

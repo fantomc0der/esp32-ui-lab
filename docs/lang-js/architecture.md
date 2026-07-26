@@ -160,6 +160,12 @@ The check is affordable because of what `lv_obj_is_valid()` does: it walks the s
 
 Reload correctness was checked on hardware with five consecutive cycles: internal RAM was identical before and after, and PSRAM drifted 56 bytes total.
 
+## Switching apps
+
+A script cannot switch apps synchronously. `sys.launch()` would have to call `jsvm_stop()`, which destroys the `JSContext` while the calling function is still executing inside it — the same use-after-free class as the trampoline hazard above. So it only records a name. The host collects it with `jsvm_take_pending_launch()` at the end of `loop()`, after LVGL dispatch, the serial REPL, and the promise queue have all unwound, and performs the switch there. The home button and the BOOT long-press feed the same queue rather than acting directly, for the same reason.
+
+The way back is deliberately not the app's responsibility. The firmware creates a home button on `lv_layer_top()`, which is not a child of the active screen, so `jsvm_stop()`'s `lv_obj_clean(lv_screen_active())` cannot delete it and no script can reach it to break it. An app that draws over its whole screen, or throws while building, still leaves you a way out — and BOOT works even if touch has stopped responding.
+
 ## Asynchronous work
 
 There is no event loop in the usual sense. Two mechanisms cover what scripts need.

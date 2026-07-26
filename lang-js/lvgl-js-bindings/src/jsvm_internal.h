@@ -56,6 +56,12 @@ bool jsvm_bind_event(JSContext *ctx, lv_obj_t *obj, lv_event_code_t code,
 // exception. Released by .stop(), or at teardown.
 JSValue jsvm_create_timer(JSContext *ctx, int32_t ms, JSValueConst fn);
 
+// ---------------------------------------------------------------- app switching
+// Records a launch request for the host to pick up after the current call
+// unwinds. See jsvm_take_pending_launch() in js_bindings.h for why it cannot
+// happen synchronously.
+void jsvm_request_launch(const char *name);
+
 // ---------------------------------------------------------------- modules
 // Each module installs its globals on a fresh context at every jsvm_start(),
 // since a reload destroys the previous one. A module holding state across the
@@ -65,6 +71,10 @@ void js_install_lv(JSContext *ctx);
 
 #if JSVM_WITH_SYS
 void js_install_sys(JSContext *ctx);
+#endif
+
+#if JSVM_WITH_FS
+void js_install_fs(JSContext *ctx);
 #endif
 
 #if JSVM_WITH_WIFI

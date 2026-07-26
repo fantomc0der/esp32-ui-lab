@@ -1,0 +1,89 @@
+// check-js-api.mjs — verify the scripts only call bindings that exist.
+//
+// The selftest in lang-js/app/selftest.js is the real check, but it needs the
+// board. This is the part that can run without hardware: it reads the names
+// the C layer actually registers and compares them against what the scripts
+// call, so a typo or a binding removed from C fails the build instead of
+// failing on the device.
+//
+//   node tools/check-js-api.mjs
+//
+// Namespaced calls only (lv.x, sys.x, fs.x, wifi.x, fetch). Widget methods are
+// not checked: `.set(` on a JS array is indistinguishable from `.set(` on a
+// widget without type inference, and guessing would mean false alarms.
+
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
+const SRC = "lang-js/lvgl-js-bindings/src";
+const SCRIPTS = "lang-js/app";
+
+const cSource = readdirSync(SRC)
+  .filter(f => f.endsWith(".cpp"))
+  .map(f => readFileSync(join(SRC, f), "utf8"))
+  .join("\n");
+
+// JS_SetPropertyStr(ctx, <target>, "<name>", ...) — the one call that publishes
+// anything to scripts, so collecting it by target gives the whole surface.
+const registered = {};
+for (const m of cSource.matchAll(/JS_SetPropertyStr\(\s*ctx,\s*(\w+),\s*"([^"]+)"/g)) {
+  (registered[m[1]] ??= new Set()).add(m[2]);
+}
+
+// Widget constructors come from a table rather than individual calls.
+const makers = new Set();
+const makersBlock = cSource.match(/kMakers\[\]\s*=\s*\{([\s\S]*?)\};/);
+if (makersBlock) {
+  for (const m of makersBlock[1].matchAll(/"(\w+)"/g)) makers.add(m[1]);
+}
+
+const surface = {
+  lv: new Set([...(registered.lv ?? []), ...makers]),
+  sys: registered.sys ?? new Set(),
+  fs: registered.o ?? new Set(),   // the fs module builds its object as `o`
+  wifi: registered.wifi ?? new Set(),
+};
+const globals = registered.global ?? new Set();
+
+for (const [ns, names] of Object.entries(surface)) {
+  if (names.size === 0) {
+    console.error(`error: found no bindings for "${ns}" — did the C layer move?`);
+    process.exit(2);
+  }
+}
+
+// ---------------------------------------------------------------- scripts
+
+function* scripts(dir) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) yield* scripts(p);
+    else if (e.name.endsWith(".js")) yield p;
+  }
+}
+
+let problems = 0;
+for (const file of scripts(SCRIPTS)) {
+  const text = readFileSync(file, "utf8");
+
+  for (const m of text.matchAll(/\b(lv|sys|fs|wifi)\.(\w+)\s*\(/g)) {
+    const [, ns, name] = m;
+    if (!surface[ns].has(name)) {
+      const line = text.slice(0, m.index).split("\n").length;
+      console.error(`${file}:${line}  ${ns}.${name}() is not a binding`);
+      problems++;
+    }
+  }
+
+  if (/\bfetch\s*\(/.test(text) && !globals.has("fetch")) {
+    console.error(`${file}  calls fetch() but it is not registered`);
+    problems++;
+  }
+}
+
+const total = Object.values(surface).reduce((n, s) => n + s.size, 0);
+if (problems) {
+  console.error(`\n${problems} problem(s) against ${total} known bindings`);
+  process.exit(1);
+}
+console.log(`ok — scripts only use the ${total} bindings the C layer registers`);

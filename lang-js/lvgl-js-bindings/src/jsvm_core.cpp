@@ -70,6 +70,27 @@ void jsvm_call_reporting(JSValue fn, int argc, JSValueConst *argv) {
   JS_FreeValue(jsvm_ctx, r);
 }
 
+// ---------------------------------------------------------------- app switching
+
+// A script cannot tear down the context it is running in, so a launch request
+// is parked here and collected by the host from outside the VM.
+static char g_pending_launch[128];
+
+void jsvm_request_launch(const char *name) {
+  strncpy(g_pending_launch, name, sizeof(g_pending_launch) - 1);
+  g_pending_launch[sizeof(g_pending_launch) - 1] = '\0';
+}
+
+const char *jsvm_take_pending_launch() {
+  if (g_pending_launch[0] == '\0') return nullptr;
+  // Hand back a stable copy: the host is about to call jsvm_start(), which
+  // reaches jsvm_stop() and would otherwise be reading a buffer we just wiped.
+  static char taken[sizeof(g_pending_launch)];
+  memcpy(taken, g_pending_launch, sizeof(taken));
+  g_pending_launch[0] = '\0';
+  return taken;
+}
+
 // ---------------------------------------------------------------- console
 
 static JSValue js_console_log(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
@@ -277,6 +298,9 @@ bool jsvm_start(const char *src, const char *filename) {
   js_install_lv(jsvm_ctx);
 #if JSVM_WITH_SYS
   js_install_sys(jsvm_ctx);
+#endif
+#if JSVM_WITH_FS
+  js_install_fs(jsvm_ctx);
 #endif
 #if JSVM_WITH_WIFI
   js_install_wifi(jsvm_ctx);

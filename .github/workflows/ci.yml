@@ -1,0 +1,99 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# What CI can and cannot do here: the real test suite is
+# lang-js/app/selftest.js, which runs on the board and talks over serial, so a
+# hosted runner cannot execute it. These jobs cover everything that does not
+# need hardware — both sketches compile, and the scripts only call bindings
+# that exist. Running selftest.js needs a self-hosted runner with a board
+# attached; see docs/lang-js/build-and-deploy.md for how it is driven.
+
+env:
+  FQBN: "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc,FlashMode=qio,USBMode=hwcdc"
+
+jobs:
+  scripts:
+    name: scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Syntax-check every script
+        run: |
+          for f in $(find lang-js/app -name '*.js'); do
+            node --check "$f" || exit 1
+            echo "ok  $f"
+          done
+
+      # Catches the failure that would otherwise only show up on the device:
+      # a script calling a binding the C layer does not register.
+      - name: Check scripts against the binding surface
+        run: node tools/check-js-api.mjs
+
+      - name: Check relative links in docs
+        run: |
+          fail=0
+          for f in $(git ls-files '*.md'); do
+            dir=$(dirname "$f")
+            for l in $(grep -o '](\([^)#]*\.\(md\|js\|ino\)\)[^)]*)' "$f" | sed 's/^](//; s/[)#].*$//'); do
+              case "$l" in http*) continue;; esac
+              target=$(realpath -m --relative-to=. "$dir/$l")
+              if [ ! -f "$target" ]; then echo "broken: $f -> $l"; fail=1; fi
+            done
+          done
+          exit $fail
+
+  firmware:
+    name: firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The esp32 core is a large download; without this the job spends most
+      # of its time re-fetching a toolchain that never changes.
+      - name: Cache Arduino cores and libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: arduino-esp32-3.3.11-lvgl-9.5.0-gfx-1.6.7
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+
+      - name: Install the core and libraries
+        run: |
+          # --overwrite because the cache restores a config from the previous
+          # run, and a bare `config init` exits 1 when one already exists.
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          # Pinned to the versions the board is verified against; see BUILDING.md.
+          arduino-cli core install esp32:esp32@3.3.11
+          arduino-cli lib install "lvgl@9.5.0"
+          arduino-cli lib install "GFX Library for Arduino@1.6.7"
+
+      - name: Build the C sketch
+        run: arduino-cli compile -b "$FQBN" lang-c/app
+
+      # Both vendored libraries live beside the sketch rather than in the
+      # libraries directory, so they are passed explicitly.
+      - name: Build the JavaScript runtime
+        run: |
+          arduino-cli compile \
+            --library lang-js/quickjs-ng \
+            --library lang-js/lvgl-js-bindings \
+            -b "$FQBN" lang-js/js-host

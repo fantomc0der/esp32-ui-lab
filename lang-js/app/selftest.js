@@ -126,6 +126,82 @@ check("stale handle throws after clean()", () => {
   return threw(() => kid.set({ text: "boom" })) && threw(() => kid.value());
 });
 
+// ---------------------------------------------------------------- text input
+check("textarea round-trips its text", () => {
+  const ta = lv.textarea(scr, { w: 80, h: 30, oneLine: true, hidden: true });
+  ta.value("hello");
+  const got = ta.value();
+  ta.set({ hidden: true });
+  return got === "hello";
+});
+
+check("keyboard targets a textarea", () => {
+  const ta = lv.textarea(scr, { w: 80, h: 30, hidden: true });
+  const kb = lv.keyboard(scr, { w: 100, h: 60, hidden: true });
+  return kb.target(ta) === kb;
+});
+
+check("target() rejects a non-keyboard", () => threw(() => panel.target(panel)));
+
+// ---------------------------------------------------------------- fs
+check("fs reports availability", () => typeof fs.available() === "boolean");
+
+check("fs write/read/remove round-trip", () => {
+  const p = "/selftest-tmp.txt";
+  if (!fs.available()) return true;           // nothing mounted; not a failure
+  const wrote = fs.write(p, "abc");
+  const back = fs.read(p);
+  const gone = fs.remove(p) && !fs.exists(p);
+  return wrote && back === "abc" && gone;
+});
+
+check("fs.append extends a file", () => {
+  const p = "/selftest-tmp2.txt";
+  if (!fs.available()) return true;
+  fs.write(p, "a");
+  fs.append(p, "b");
+  const got = fs.read(p);
+  fs.remove(p);
+  return got === "ab";
+});
+
+check("fs.read of a missing file is null", () =>
+  !fs.available() || fs.read("/definitely-not-here.txt") === null);
+
+check("fs.list returns an array or null", () => {
+  if (!fs.available()) return true;
+  const l = fs.list("/");
+  return l === null || Array.isArray(l);
+});
+
+check("relative paths are rejected", () => threw(() => fs.read("nope.txt")));
+
+// ---------------------------------------------------------------- network
+check("wifi.status has the expected shape", () => {
+  const s = wifi.status();
+  return typeof s.connected === "boolean" && typeof s.ssid === "string" &&
+         typeof s.ip === "string" && typeof s.saved === "boolean";
+});
+
+check("wifi.status never leaks the password", () => {
+  const s = wifi.status();
+  return !("password" in s) && !("pass" in s);
+});
+
+check("fetch exists", () => typeof fetch === "function");
+
+check("fetch without a connection fails fast", () => {
+  if (wifi.status().connected) return true;   // can't test the guard when up
+  return threw(() => fetch("http://example.com"));
+});
+
+// ---------------------------------------------------------------- app switching
+check("sys.launch exists and defers", () => {
+  // Calling it would switch apps out from under the test, so only check the
+  // shape. The switch itself is exercised by the launcher.
+  return typeof sys.launch === "function";
+});
+
 // ---------------------------------------------------------------- events
 check("on() returns the widget", () => {
   const b = lv.button(panel, { text: "e", w: 20, h: 20 });

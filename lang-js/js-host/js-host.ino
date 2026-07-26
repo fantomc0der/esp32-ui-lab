@@ -345,6 +345,16 @@ static bool writeScript(const char *path, const String &text) {
   const char *p;
   fs::FS *dest = resolveFs(path, &p);
   if (!dest) return false;
+
+  // Create the parent directory if it is missing: open(FILE_WRITE) will not, so
+  // uploading /apps/x.js to a card with no /apps directory silently failed.
+  const char *slash = strrchr(p, '/');
+  if (slash && slash != p) {
+    String dir(p);
+    dir.remove(slash - p);
+    if (!dest->exists(dir.c_str())) dest->mkdir(dir.c_str());
+  }
+
   File f = dest->open(p, FILE_WRITE);
   if (!f) return false;
   f.print(text);

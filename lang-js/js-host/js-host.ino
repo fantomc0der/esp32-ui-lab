@@ -2,17 +2,21 @@
 // ESP32-S3-Touch-LCD-1.47.
 //
 // The firmware is C; the UI is not. At boot this sketch brings up the display,
-// touch, and LVGL exactly like the proven C demo (lang-c/app),
-// then hands control to a JavaScript file executed by QuickJS-ng:
+// touch, and LVGL exactly like the proven C demo (lang-c/app), then hands the
+// screen to JavaScript executed by QuickJS-ng.
 //
-//   1. /app.js on the microSD card        (edit on a PC, move the card)
-//   2. /app.js on the 9.9 MB FATFS flash partition
-//   3. a built-in fallback script          (says "no app.js found" on screen)
+// The board runs one script at a time and boots into /app.js, the launcher,
+// which lists the other scripts on the card and starts whichever you tap. A
+// script asks to switch with sys.launch(), and there are two ways back that no
+// app can break: the home button the firmware draws on LVGL's top layer, and a
+// long-press of BOOT. Every switch is queued and performed from loop(), never
+// from inside a callback (see requestApp).
 //
-// Long-press BOOT (>= 700 ms) to reload: the JS world is torn down and app.js
-// is re-read from storage — the edit loop needs no compiler and no reflash.
-// The serial port is a JS REPL into the running app (one line = one eval),
-// and "reload" typed on serial triggers the same reload as the button.
+// A missing or throwing app falls back to the launcher; a missing launcher
+// falls back to a screen built into the firmware, so the panel is never dead.
+//
+// The serial port is a JS REPL into the running app plus a few host commands
+// (home, reload, ls, rm, app-begin/app-end) — see pollSerialRepl().
 //
 // The JS engine and the LVGL bindings are libraries beside this sketch
 // (../quickjs-ng, ../lvgl-js-bindings); what stays here is the hardware
@@ -123,47 +127,102 @@ static char *readAll(fs::FS &fs, const char *path) {
   return buf;
 }
 
-// Mount SD fresh on every call so a card swapped while powered is seen.
-static char *loadFromSd() {
-  SD_MMC.setPins(SD_PIN_CLK, SD_PIN_CMD, SD_PIN_D0, SD_PIN_D1, SD_PIN_D2, SD_PIN_D3);
-  if (!SD_MMC.begin("/sdcard", false /* 4-bit */)) return nullptr;
-  char *src = (SD_MMC.cardType() != CARD_NONE) ? readAll(SD_MMC, "/app.js") : nullptr;
-  SD_MMC.end();
+// The launcher: the script that lists the others. Everything else is reached
+// from it, and it is where a failed app lands you.
+static const char *kLauncher = "/app.js";
+
+static bool g_sd_ok = false;
+static bool g_flash_ok = false;
+static char g_current_app[128] = "";
+static char g_next_app[128] = "";
+static lv_obj_t *g_home_btn = nullptr;
+
+// Queues an app switch. Every path that changes apps goes through here — a
+// script's sys.launch(), the home button, the BOOT button — so the actual
+// teardown always happens from loop() and never from inside a callback that
+// the teardown would pull the ground out from under.
+static void requestApp(const char *path) {
+  strncpy(g_next_app, path, sizeof(g_next_app) - 1);
+  g_next_app[sizeof(g_next_app) - 1] = '\0';
+}
+
+// "flash:/x" reads the FATFS partition explicitly. Any other path prefers the
+// card and falls back to flash, so the same script paths work whether or not a
+// card is fitted.
+static char *loadScript(const char *path) {
+  if (strncmp(path, "flash:", 6) == 0) {
+    return g_flash_ok ? readAll(FFat, path + 6) : nullptr;
+  }
+  char *src = g_sd_ok ? readAll(SD_MMC, path) : nullptr;
+  if (!src && g_flash_ok) src = readAll(FFat, path);
   return src;
 }
 
-static char *loadFromFlash() {
-  // format-on-fail: first boot leaves the 9.9 MB FATFS partition unformatted.
-  if (!FFat.begin(true)) return nullptr;
-  char *src = readAll(FFat, "/app.js");
-  FFat.end();
-  return src;
+static void showHomeButton(bool visible) {
+  if (!g_home_btn) return;
+  if (visible) lv_obj_remove_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
-// Loads app.js (SD, then FATFS, then built-in) and starts the VM. A script
-// that throws at boot is torn down and replaced by the fallback screen.
-static void runApp() {
+// Starts a script. A missing or throwing app falls back to the launcher, and
+// a broken launcher falls back to the built-in screen, so there is no way to
+// end up staring at a dead panel. Recursion is bounded at one level: the
+// retry always targets kLauncher, which takes the built-in branch if it fails.
+static void runApp(const char *path) {
   jsvm_stop();
 
-  char *src = loadFromSd();
-  const char *origin = "sd:/app.js";
-  if (!src) { src = loadFromFlash(); origin = "ffat:/app.js"; }
-  if (!src) { origin = "built-in fallback"; }
-  Serial.printf("[app] running %s\n", origin);
-
-  bool ok;
+  char *src = loadScript(path);
+  bool ok = false;
   if (src) {
-    ok = jsvm_start(src, origin);
+    Serial.printf("[app] running %s\n", path);
+    ok = jsvm_start(src, path);
     heap_caps_free(src);
   } else {
-    ok = jsvm_start(kFallbackScript, origin);
+    Serial.printf("[app] %s not found\n", path);
   }
 
-  if (!ok && src) {
-    Serial.println("[app] script failed, showing fallback");
+  if (ok) {
+    strncpy(g_current_app, path, sizeof(g_current_app) - 1);
+    g_current_app[sizeof(g_current_app) - 1] = '\0';
+  } else {
     jsvm_stop();
+    if (strcmp(path, kLauncher) != 0) {
+      Serial.println("[app] falling back to the launcher");
+      runApp(kLauncher);
+      return;
+    }
+    Serial.println("[app] no launcher, using the built-in screen");
     jsvm_start(kFallbackScript, "built-in fallback");
+    g_current_app[0] = '\0';
   }
+
+  // Nothing to go back to while the launcher itself is showing.
+  showHomeButton(strcmp(g_current_app, kLauncher) != 0);
+}
+
+// The way back, drawn once and owned by the firmware. It lives on LVGL's top
+// layer rather than the active screen, so jsvm_stop()'s lv_obj_clean() cannot
+// delete it and no script can reach it — every app gets an escape hatch it is
+// incapable of breaking. Tapping only queues the switch; see requestApp().
+static void homeClicked(lv_event_t *) { requestApp(kLauncher); }
+
+static void createHomeButton() {
+  g_home_btn = lv_button_create(lv_layer_top());
+  lv_obj_set_size(g_home_btn, 34, 34);
+  lv_obj_align(g_home_btn, LV_ALIGN_BOTTOM_RIGHT, -3, -3);
+  lv_obj_set_style_radius(g_home_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(g_home_btn, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_bg_opa(g_home_btn, LV_OPA_60, 0);
+  lv_obj_set_style_border_color(g_home_btn, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_border_width(g_home_btn, 1, 0);
+  lv_obj_set_style_border_opa(g_home_btn, LV_OPA_50, 0);
+  lv_obj_set_style_shadow_width(g_home_btn, 0, 0);
+  lv_obj_add_event_cb(g_home_btn, homeClicked, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *icon = lv_label_create(g_home_btn);
+  lv_label_set_text(icon, LV_SYMBOL_HOME);
+  lv_obj_center(icon);
+  showHomeButton(false);
 }
 
 // ---------------------------------------------------------------- setup / loop
@@ -219,23 +278,59 @@ void setup() {
   lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(touch_indev, lv_touch_cb);
 
-  runApp();
+  // Storage is mounted once and kept, which is what lets scripts have a real
+  // filesystem. The tradeoff is hot-swapping: changing cards now needs a reset.
+  SD_MMC.setPins(SD_PIN_CLK, SD_PIN_CMD, SD_PIN_D0, SD_PIN_D1, SD_PIN_D2, SD_PIN_D3);
+  g_sd_ok = SD_MMC.begin("/sdcard", false /* 4-bit */) && SD_MMC.cardType() != CARD_NONE;
+  g_flash_ok = FFat.begin(true /* format on first use */);
+  Serial.printf("[boot] storage: sd %s, flash %s\n",
+                g_sd_ok ? "ok" : "none", g_flash_ok ? "ok" : "none");
+  jsvm_set_filesystem(g_sd_ok ? &SD_MMC : nullptr, g_flash_ok ? &FFat : nullptr);
+
+  createHomeButton();
+  runApp(kLauncher);
 
   fps_window_start = millis();
   setBacklight(80);
-  Serial.println("[boot] ready — serial is a JS REPL; 'reload' = reload app.js");
+  Serial.println("[boot] ready — serial is a JS REPL; 'reload' restarts the app, 'home' opens the launcher");
+}
+
+// Same "flash:" convention the loader and the fs bindings use: explicit prefix
+// picks flash, otherwise the card when one is fitted and flash when not.
+static fs::FS *resolveFs(const char *path, const char **out_path) {
+  if (strncmp(path, "flash:", 6) == 0) {
+    *out_path = path + 6;
+    return g_flash_ok ? static_cast<fs::FS *>(&FFat) : nullptr;
+  }
+  *out_path = path;
+  if (g_sd_ok) return static_cast<fs::FS *>(&SD_MMC);
+  return g_flash_ok ? static_cast<fs::FS *>(&FFat) : nullptr;
+}
+
+static bool writeScript(const char *path, const String &text) {
+  const char *p;
+  fs::FS *dest = resolveFs(path, &p);
+  if (!dest) return false;
+  File f = dest->open(p, FILE_WRITE);
+  if (!f) return false;
+  f.print(text);
+  f.close();
+  return true;
 }
 
 // One line from serial = one JS eval in the running app's context, except for
 // host commands:
-//   reload                     tear down and re-read app.js
-//   app-begin ... app-end      capture the lines in between into ffat:/app.js
-//                              (script upload without touching the SD card),
-//                              then reload
-//   app-clear                  delete ffat:/app.js and reload
+//   home                       open the launcher
+//   reload                     restart the current app from storage
+//   ls [dir]                   list a directory (default /)
+//   rm <path>                  delete a file
+//   app-begin [path]           start receiving a script; defaults to whatever
+//     ...lines...              is running now, so the usual edit loop is just
+//   app-end                    app-begin / paste / app-end, then it reloads
 static void pollSerialRepl() {
   static String line;
   static String upload;
+  static String upload_path;
   static bool uploading = false;
   // Caps so a hostile/broken sender can't grow these Strings until the
   // internal heap dies: REPL lines beyond 4 KB are discarded, uploads beyond
@@ -260,39 +355,50 @@ static void pollSerialRepl() {
     if (uploading) {
       if (line == "app-end") {
         uploading = false;
-        if (FFat.begin(true)) {
-          File f = FFat.open("/app.js", FILE_WRITE);
-          if (f) {
-            f.print(upload);
-            f.close();
-            Serial.printf("[app] wrote %u bytes to ffat:/app.js\n", upload.length());
-          } else {
-            Serial.println("[app] ffat:/app.js open FAILED");
-          }
-          FFat.end();
+        if (writeScript(upload_path.c_str(), upload)) {
+          Serial.printf("[app] wrote %u bytes to %s\n", upload.length(), upload_path.c_str());
+          upload = "";
+          requestApp(upload_path.c_str());
         } else {
-          Serial.println("[app] FFat mount FAILED");
+          Serial.printf("[app] write to %s FAILED\n", upload_path.c_str());
+          upload = "";
         }
-        upload = "";
-        runApp();
       } else {
         upload += line;
         upload += '\n';
       }
+    } else if (line == "home") {
+      requestApp(kLauncher);
     } else if (line == "reload") {
       Serial.println("[app] reload requested over serial");
-      runApp();
-    } else if (line == "app-begin") {
+      requestApp(g_current_app[0] ? g_current_app : kLauncher);
+    } else if (line == "ls" || line.startsWith("ls ")) {
+      const String dir = (line.length() > 3) ? line.substring(3) : String("/");
+      const char *p; fs::FS *f = resolveFs(dir.c_str(), &p);
+      File d = f ? f->open(p) : File();
+      if (!d || !d.isDirectory()) {
+        Serial.printf("[fs] %s is not a directory\n", dir.c_str());
+      } else {
+        for (File e = d.openNextFile(); e; e = d.openNextFile()) {
+          Serial.printf("  %-28s %8u%s\n", e.name(), (unsigned)e.size(),
+                        e.isDirectory() ? "  <dir>" : "");
+          e.close();
+        }
+      }
+      if (d) d.close();
+    } else if (line.startsWith("rm ")) {
+      const String target = line.substring(3);
+      const char *p; fs::FS *f = resolveFs(target.c_str(), &p);
+      Serial.printf("[fs] rm %s %s\n", target.c_str(),
+                    (f && f->remove(p)) ? "ok" : "FAILED");
+    } else if (line == "app-begin" || line.startsWith("app-begin ")) {
+      // No path given means "replace what is running", which is the common
+      // case while iterating on one app.
+      upload_path = (line.length() > 10) ? line.substring(10)
+                                         : String(g_current_app[0] ? g_current_app : kLauncher);
       uploading = true;
       upload = "";
-      Serial.println("[app] receiving script; finish with app-end");
-    } else if (line == "app-clear") {
-      if (FFat.begin(true)) {
-        FFat.remove("/app.js");
-        FFat.end();
-        Serial.println("[app] ffat:/app.js removed");
-      }
-      runApp();
+      Serial.printf("[app] receiving into %s; finish with app-end\n", upload_path.c_str());
     } else if (line.length()) {
       jsvm_repl_line(line.c_str());
     }
@@ -311,15 +417,17 @@ void loop() {
     fps_window_start = now;
   }
 
-  // Long-press BOOT (>= 700 ms) = reload. Fires once per press.
+  // Long-press BOOT (>= 700 ms) opens the launcher. This is the hardware
+  // escape hatch: it works even if an app has covered the home button or the
+  // touch panel has stopped responding.
   static uint32_t boot_down_since = 0;
   static bool boot_fired = false;
   if (digitalRead(BOOT_BTN_PIN) == LOW) {
     if (boot_down_since == 0) boot_down_since = now;
     if (!boot_fired && now - boot_down_since >= 700) {
       boot_fired = true;
-      Serial.println("[app] reload requested via BOOT long-press");
-      runApp();
+      Serial.println("[app] launcher requested via BOOT long-press");
+      requestApp(kLauncher);
     }
   } else {
     boot_down_since = 0;
@@ -328,5 +436,18 @@ void loop() {
 
   pollSerialRepl();
   jsvm_pump();  // promise reactions / async continuations
+
+  // Switch apps only here, once everything that could be mid-callback has
+  // finished: LVGL event dispatch, the serial REPL, and the promise queue can
+  // all ask for a switch, and none of them can survive their own teardown.
+  const char *from_js = jsvm_take_pending_launch();
+  if (from_js) requestApp(from_js);
+  if (g_next_app[0] != '\0') {
+    char path[sizeof(g_next_app)];
+    strncpy(path, g_next_app, sizeof(path));
+    g_next_app[0] = '\0';
+    runApp(path);
+  }
+
   delay(idle_ms);
 }

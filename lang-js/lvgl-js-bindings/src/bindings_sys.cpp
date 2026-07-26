@@ -60,6 +60,19 @@ static JSValue js_sys_info(JSContext *ctx, JSValueConst, int, JSValueConst *) {
   return o;
 }
 
+// Asks the host to run a different script. Returns immediately and the
+// current app keeps running until the call stack unwinds — the switch cannot
+// happen here, because tearing down the context mid-call would free the very
+// closure that is executing. The host performs it from loop().
+static JSValue js_sys_launch(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
+  if (argc < 1) return JS_ThrowTypeError(ctx, "launch(name) needs a script path");
+  const char *s = JS_ToCString(ctx, argv[0]);
+  if (!s) return JS_EXCEPTION;
+  jsvm_request_launch(s);
+  JS_FreeCString(ctx, s);
+  return JS_UNDEFINED;
+}
+
 void js_install_sys(JSContext *ctx) {
   JSValue global = JS_GetGlobalObject(ctx);
 
@@ -70,6 +83,7 @@ void js_install_sys(JSContext *ctx) {
   JS_SetPropertyStr(ctx, sys, "fps", JS_NewCFunction(ctx, js_sys_fps, "fps", 0));
   JS_SetPropertyStr(ctx, sys, "backlight", JS_NewCFunction(ctx, js_sys_backlight, "backlight", 1));
   JS_SetPropertyStr(ctx, sys, "info", JS_NewCFunction(ctx, js_sys_info, "info", 0));
+  JS_SetPropertyStr(ctx, sys, "launch", JS_NewCFunction(ctx, js_sys_launch, "launch", 1));
   JS_SetPropertyStr(ctx, global, "sys", sys);
 
   JS_FreeValue(ctx, global);

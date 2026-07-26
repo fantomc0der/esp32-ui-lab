@@ -15,6 +15,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <FS.h>
 
 // Optional modules, on by default. Define to 0 in your sketch's build_opt.h to
 // leave one out of the build entirely (e.g. -DJSVM_WITH_WIFI=0 on a board with
@@ -25,6 +26,9 @@
 #endif
 #ifndef JSVM_WITH_WIFI
 #define JSVM_WITH_WIFI 1
+#endif
+#ifndef JSVM_WITH_FS
+#define JSVM_WITH_FS 1
 #endif
 
 // Creates a runtime and context (JS heap in PSRAM), installs the lv/sys/wifi/
@@ -52,6 +56,26 @@ void jsvm_repl_line(const char *src);
 // continuations). quickjs-libc's event loop normally does this; without your
 // own pump a .then() callback would never fire. Call once per loop().
 void jsvm_pump();
+
+// ---- storage ---------------------------------------------------------------
+
+// Registers the filesystems the fs.* bindings operate on. Paths are relative
+// to `sd` by default; a "flash:" prefix targets `flash`. Either may be null,
+// and calls against a null filesystem throw rather than failing silently.
+// Mounting and unmounting stay the host's business — the library only reads
+// and writes through what it is given.
+void jsvm_set_filesystem(fs::FS *sd, fs::FS *flash);
+
+// ---- app switching ---------------------------------------------------------
+
+// Returns the script a running app asked to launch via sys.launch(), or null
+// if none is pending, clearing it either way. Poll this from loop().
+//
+// It has to work this way: a script cannot switch apps synchronously, because
+// doing so would destroy the JSContext while that very call is still running
+// inside it. sys.launch() therefore only records the request, and the host
+// performs the switch afterwards from outside the VM.
+const char *jsvm_take_pending_launch();
 
 // ---- host hooks: implement these in your sketch -----------------------------
 // These are what sys.fps(), sys.backlight() and sys.battery() call.

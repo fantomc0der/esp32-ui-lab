@@ -18,6 +18,7 @@
 #include <FS.h>
 
 #include "board_config.h"
+#include "shared_spi.h"
 
 #if BOARD_HAS_SDMMC
 #include <SD_MMC.h>
@@ -36,20 +37,38 @@ inline bool g_sd_ok = false;
 inline bool g_flash_ok = false;
 
 #if BOARD_HAS_SD_SPI
-// The CYD's card shares a bus with the touch controller, so it gets its own
-// SPIClass instance rather than the global SPI object the display may be using.
+// The card shares this peripheral with the touch controller; see shared_spi.h
+// for why there is no third bus and how the two take turns.
 inline SPIClass g_sd_spi(VSPI);
+
+// Point the bus at the card. The SD library only calls beginTransaction() and
+// never re-asserts pins, so anything that reads or writes the card has to do
+// this first or the transfer goes out on the touch controller's pins.
+inline void claimBus() {
+  shared_spi::claim(g_sd_spi, &g_sd_spi, SD_PIN_SCK, SD_PIN_MISO, SD_PIN_MOSI,
+                    SD_PIN_CS);
+}
+#else
+inline void claimBus() {}  // dedicated bus (SDMMC): nothing to arbitrate
 #endif
 
 // Mounts whatever this board has. Mounted once and kept: that is what gives
 // scripts a real filesystem, at the cost of needing a reset to swap cards.
 inline void begin() {
+#ifdef BOARD_SKIP_SD_TEST
+  // Diagnostic escape hatch: skip mounting entirely, to test whether bringing
+  // the card up is what breaks another device on the shared bus.
+  return;
+#endif
 #if BOARD_HAS_SDMMC
   SD_MMC.setPins(SD_PIN_CLK, SD_PIN_CMD, SD_PIN_D0, SD_PIN_D1, SD_PIN_D2, SD_PIN_D3);
   g_sd_ok = SD_MMC.begin("/sdcard", false /* 4-bit */) && SD_MMC.cardType() != CARD_NONE;
 #elif BOARD_HAS_SD_SPI
   g_sd_spi.begin(SD_PIN_SCK, SD_PIN_MISO, SD_PIN_MOSI, SD_PIN_CS);
   g_sd_ok = SD.begin(SD_PIN_CS, g_sd_spi) && SD.cardType() != CARD_NONE;
+  // SD.begin() reconfigures the bus itself, so the recorded owner is stale
+  // regardless of what it says: force the next claim to re-assert.
+  shared_spi::invalidate();
 #endif
 
 #if BOARD_HAS_FATFS
@@ -60,8 +79,13 @@ inline void begin() {
 }
 
 // The card, or nullptr when absent or this board has no card slot.
+//
+// Claims the shared bus on the way out: every caller reaches the card through
+// here, so this is the one place that guarantees the pin matrix is ours before
+// any read or write. (Cheap when we already hold it.)
 inline fs::FS *sd() {
   if (!g_sd_ok) return nullptr;
+  claimBus();
 #if BOARD_HAS_SDMMC
   return static_cast<fs::FS *>(&SD_MMC);
 #elif BOARD_HAS_SD_SPI

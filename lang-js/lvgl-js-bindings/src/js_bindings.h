@@ -66,6 +66,15 @@ void jsvm_pump();
 // and writes through what it is given.
 void jsvm_set_filesystem(fs::FS *sd, fs::FS *flash);
 
+// ---- network ---------------------------------------------------------------
+
+#if JSVM_WITH_WIFI
+// Joins the access point whose credentials a script previously stored with
+// wifi.save(). Call once from setup(); returns false when nothing is saved.
+// Reconnection after that is automatic and event-driven.
+bool jsvm_wifi_autoconnect();
+#endif
+
 // ---- app switching ---------------------------------------------------------
 
 // Returns the script a running app asked to launch via sys.launch(), or null

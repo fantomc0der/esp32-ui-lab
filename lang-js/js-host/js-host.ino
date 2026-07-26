@@ -254,8 +254,13 @@ void setup() {
   Wire.setClock(400000);
   touch_begin();
 
+  // Radio up so wifi.scan() works even before anything is configured; if a
+  // script has saved credentials, rejoin that network now. Staying joined
+  // afterwards is handled inside the binding's event handler.
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
+  if (!jsvm_wifi_autoconnect()) {
+    Serial.println("[wifi] no saved network — use the Wifi app or wifi.save()");
+  }
 
   lv_init();
   lv_tick_set_cb(lv_tick_cb);

@@ -15,8 +15,14 @@
 // A missing or throwing app falls back to the launcher; a missing launcher
 // falls back to a screen built into the firmware, so the panel is never dead.
 //
+// Pinning turns the board into a single-app appliance: with a pin set (sys.pin()
+// from a script, or `pin` over serial) the boot goes straight to that script and
+// the home button is not drawn at all, so nothing on screen hints at a launcher
+// that is no longer part of the product. BOOT long-press still reaches it, which
+// is how you unpin a board with no serial attached.
+//
 // The serial port is a JS REPL into the running app plus a few host commands
-// (home, reload, ls, rm, app-begin/app-end) — see pollSerialRepl().
+// (home, reload, pin, unpin, ls, rm, app-begin/app-end) — see pollSerialRepl().
 //
 // The JS engine and the LVGL bindings are libraries beside this sketch
 // (../quickjs-ng, ../lvgl-js-bindings); what stays here is the hardware
@@ -158,9 +164,18 @@ static char *loadScript(const char *path) {
   return src;
 }
 
-static void showHomeButton(bool visible) {
+// The home button is derived state: it appears only when there is somewhere to
+// go back to. A pin says this board runs one app, so it hides for good — an
+// escape hatch you are not meant to use is just a stray control on the UI.
+// Cheap enough to call every loop(), which is what keeps it right when a script
+// pins or unpins while running.
+static void updateHomeButton() {
   if (!g_home_btn) return;
-  if (visible) lv_obj_remove_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
+  const bool want = jsvm_pinned_app() == nullptr && strcmp(g_current_app, kLauncher) != 0;
+  static bool shown = false;  // createHomeButton() starts it hidden
+  if (want == shown) return;
+  shown = want;
+  if (want) lv_obj_remove_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
   else lv_obj_add_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -196,8 +211,7 @@ static void runApp(const char *path) {
     g_current_app[0] = '\0';
   }
 
-  // Nothing to go back to while the launcher itself is showing.
-  showHomeButton(strcmp(g_current_app, kLauncher) != 0);
+  updateHomeButton();
 }
 
 // The way back, drawn once and owned by the firmware. It lives on LVGL's top
@@ -222,7 +236,7 @@ static void createHomeButton() {
   lv_obj_t *icon = lv_label_create(g_home_btn);
   lv_label_set_text(icon, LV_SYMBOL_HOME);
   lv_obj_center(icon);
-  showHomeButton(false);
+  lv_obj_add_flag(g_home_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
 // ---------------------------------------------------------------- setup / loop
@@ -296,7 +310,12 @@ void setup() {
     Serial.println("[wifi] no saved network — use the Wifi app or wifi.save()");
   }
 
-  runApp(kLauncher);
+  // A pinned app takes the place of the launcher entirely. If it is missing or
+  // throws, runApp() still lands on the launcher, so a bad pin costs you the
+  // appliance behaviour but never the board.
+  const char *pinned = jsvm_pinned_app();
+  if (pinned) Serial.printf("[app] %s is pinned — skipping the launcher\n", pinned);
+  runApp(pinned ? pinned : kLauncher);
 
   fps_window_start = millis();
   setBacklight(80);
@@ -330,6 +349,9 @@ static bool writeScript(const char *path, const String &text) {
 // host commands:
 //   home                       open the launcher
 //   reload                     restart the current app from storage
+//   pin [path]                 boot straight into this app from now on,
+//                              defaulting to whatever is running
+//   unpin                      go back to booting the launcher
 //   ls [dir]                   list a directory (default /)
 //   rm <path>                  delete a file
 //   app-begin [path]           start receiving a script; defaults to whatever
@@ -380,6 +402,16 @@ static void pollSerialRepl() {
     } else if (line == "reload") {
       Serial.println("[app] reload requested over serial");
       requestApp(g_current_app[0] ? g_current_app : kLauncher);
+    } else if (line == "pin" || line.startsWith("pin ")) {
+      // Bare `pin` means "this one", the case you are in after tapping an app.
+      const String target = (line.length() > 4) ? line.substring(4) : String(g_current_app);
+      if (target.isEmpty() || target == kLauncher) {
+        Serial.println("[app] pin <path>, or run the app you want pinned first");
+      } else if (!jsvm_set_pinned_app(target.c_str())) {
+        Serial.println("[app] pin FAILED (NVS unavailable)");
+      }
+    } else if (line == "unpin") {
+      jsvm_set_pinned_app(nullptr);
     } else if (line == "ls" || line.startsWith("ls ")) {
       const String dir = (line.length() > 3) ? line.substring(3) : String("/");
       const char *p; fs::FS *f = resolveFs(dir.c_str(), &p);
@@ -426,8 +458,8 @@ void loop() {
   }
 
   // Long-press BOOT (>= 700 ms) opens the launcher. This is the hardware
-  // escape hatch: it works even if an app has covered the home button or the
-  // touch panel has stopped responding.
+  // escape hatch: it works even if an app has covered the home button, a pin
+  // has removed it, or the touch panel has stopped responding.
   static uint32_t boot_down_since = 0;
   static bool boot_fired = false;
   if (digitalRead(BOOT_BTN_PIN) == LOW) {
@@ -444,6 +476,7 @@ void loop() {
 
   pollSerialRepl();
   jsvm_pump();  // promise reactions / async continuations
+  updateHomeButton();  // a script may have pinned or unpinned since last pass
 
   // Switch apps only here, once everything that could be mid-callback has
   // finished: LVGL event dispatch, the serial REPL, and the promise queue can

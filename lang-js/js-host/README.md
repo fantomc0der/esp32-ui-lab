@@ -14,6 +14,8 @@ Two docs cover this sketch: [`docs/lang-js/binding-api.md`](../../docs/lang-js/b
 
 The shipped app lives at [`../app/app.js`](../app/app.js); copy it to a FAT-formatted card's root.
 
+Pinning replaces step 1: with a pin set (long-press an app in the launcher, or `pin <path>` over serial), the boot goes straight to that script and the firmware draws no home button, so the board reads as a single-app appliance rather than a menu. A long-press of **BOOT** still opens the launcher — the only way back once the button is gone, and where you unpin.
+
 ## The edit loop
 
 Edit `app.js` on the PC → put the card back → long-press **BOOT** (≥ 700 ms). The JS world is torn down, the file is re-read, the new UI builds. No toolchain, no reflash.

@@ -67,7 +67,7 @@ Fonts do not scale: the three sizes are fixed bitmaps compiled into the firmware
 ### Widget methods
 
 - `.set(props)` — apply props, returns the widget (chainable)
-- `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`, `"press"`; returns the widget. When a pointer drove the event the callback is `fn(widget, x, y)` with the touch point in screen coordinates; otherwise just `fn(widget)`
+- `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`, `"press"`, `"longpress"`; returns the widget. When a pointer drove the event the callback is `fn(widget, x, y)` with the touch point in screen coordinates; otherwise just `fn(widget)`. `"longpress"` fires while the finger is still down, and LVGL still sends `"click"` when it lifts — a long-press gesture that must not also count as a tap has to claim the click itself, which is what [`app/app.js`](../../lang-js/app/app.js) does with a flag it clears on `"press"`
 - `.value()` / `.value(n)` — get/set for slider, arc, switch
 - `.add(text)` — lists only; returns the row's button handle
 - `.addTab(name)` — tabviews only; returns the tab's content container
@@ -110,12 +110,23 @@ Credentials are write-only by design: a script can set them but no API hands the
 - `sys.backlight(pct)` → LEDC PWM, clamped 0–100, hardware floor keeps the panel faintly visible
 - `sys.info()` → `{ model, rev, cores, mhz, flashMB, psramMB, lvgl, quickjs }`
 - `sys.launch(path)` → asks the firmware to run a different script. It returns immediately and your app keeps running until the current call finishes; the switch happens after that. It cannot be synchronous, because tearing down the VM mid-call would free the function that is executing.
+- `sys.pin(path)` → makes that script the one the board boots into, instead of the launcher. Stored in NVS, so it survives reboots and reflashes. Returns `true` on success; throws on a relative path. It does not switch apps — pair it with `sys.launch(path)` if you want both.
+- `sys.unpin()` → clears the pin; the launcher is the boot script again.
+- `sys.pinned()` → the pinned path, or `null`. The path is whatever was pinned, which may name a script that has since been deleted.
 
 ## Apps and getting back
 
 The board boots `/app.js`, the launcher, which lists `/apps/*.js`. Any script can hand over with `sys.launch("/apps/other.js")`.
 
 You never have to provide a way back. The firmware draws a home button on LVGL's top layer, above whatever your app draws and outside the widget tree it can delete, and a long-press of BOOT does the same thing in hardware. It sits in the bottom-right corner, so leave that corner clear if you're placing something full-width along the bottom.
+
+## Pinning one app
+
+Pinning turns the board into an appliance: with a pin set, boot goes straight to that script and **the firmware stops drawing the home button entirely**, so nothing on screen refers to a launcher that is no longer part of the product. That corner is yours again, and a pinned app should provide whatever navigation it needs itself.
+
+The escape hatch that remains is the hardware one: a long-press of BOOT (≥ 700 ms) always opens the launcher, whatever is pinned. That is how you reach a board you have pinned, and the launcher is where you release the pin — long-press an app row to pin it, long-press the highlighted row to unpin. Over serial, `pin [path]` and `unpin` do the same thing.
+
+A pin that names a missing or broken script costs you the appliance behaviour, not the board: the load fails, and the firmware falls back to the launcher exactly as it does for any other app.
 
 One thing to know when building multi-screen apps: rebuilding the screen from inside a click handler deletes the widget LVGL is currently dispatching to. Defer it by a tick instead, which is what [`apps/wifi.js`](../../lang-js/app/apps/wifi.js) does:
 

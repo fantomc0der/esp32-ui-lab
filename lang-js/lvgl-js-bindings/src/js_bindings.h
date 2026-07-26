@@ -86,6 +86,23 @@ bool jsvm_wifi_autoconnect();
 // performs the switch afterwards from outside the VM.
 const char *jsvm_take_pending_launch();
 
+#if JSVM_WITH_SYS
+// The script a user pinned with sys.pin(), or null when nothing is pinned. The
+// pin is stored in NVS, so it survives reboots and reflashes.
+//
+// The library only remembers the preference; acting on it is host policy. A
+// host that honours it boots straight into that script instead of its launcher,
+// and stops drawing whatever it normally draws over apps to get back. Reading
+// this is cheap — the value is cached, not fetched from NVS on every call — so
+// it is fine to poll from loop().
+const char *jsvm_pinned_app();
+
+// Pins a script, or clears the pin when path is null. Same store sys.pin()
+// writes to, so a host command line and a script agree on one setting.
+// Returns false if NVS could not be opened.
+bool jsvm_set_pinned_app(const char *path);
+#endif
+
 // ---- host hooks: implement these in your sketch -----------------------------
 // These are what sys.fps(), sys.backlight() and sys.battery() call.
 

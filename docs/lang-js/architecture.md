@@ -166,6 +166,14 @@ A script cannot switch apps synchronously. `sys.launch()` would have to call `js
 
 The way back is deliberately not the app's responsibility. The firmware creates a home button on `lv_layer_top()`, which is not a child of the active screen, so `jsvm_stop()`'s `lv_obj_clean(lv_screen_active())` cannot delete it and no script can reach it to break it. An app that draws over its whole screen, or throws while building, still leaves you a way out — and BOOT works even if touch has stopped responding.
 
+## Pinning one app
+
+A pin is a single NVS string, written by `sys.pin()` or the host's `pin` command and read back by `jsvm_pinned_app()`. The binding library only remembers the preference; what to do about it is host policy, which keeps the split intact — the library still knows nothing about launchers or home buttons. `js-host` reads it in two places: `setup()` boots the pinned script instead of `kLauncher`, and `updateHomeButton()` treats a pin as "there is nowhere to go back to" and keeps the button hidden.
+
+The button is derived state rather than something each caller sets, because a script can pin or unpin itself at any moment; `updateHomeButton()` therefore runs once per `loop()` and touches LVGL only when the answer changes. The value it reads is cached in RAM, so polling it does not hit NVS.
+
+Two properties are worth preserving if this changes. A pinned script that fails to load still falls back to the launcher, so a bad pin cannot brick the panel. And the BOOT long-press deliberately ignores the pin: it is the only route back to the launcher once the home button is gone, and therefore the only way to unpin a board with nothing plugged into it.
+
 ## Asynchronous work
 
 There is no event loop in the usual sense. Two mechanisms cover what scripts need.

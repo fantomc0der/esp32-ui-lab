@@ -20,6 +20,8 @@ Both libraries compile against the **sketch-local** `lv_conf.h`, because the ske
 
 Flashing js-host is a one-time step; after that the UI is data, not firmware. The board boots `/app.js` — the launcher — which lists `/apps/*.js` and runs whichever you tap. An app that is missing or throws falls back to the launcher, and a missing launcher falls back to a screen built into the firmware, so the panel is never dead. Paths prefer the SD card and fall back to the flash partition, so the same layout works with or without a card fitted.
 
+To ship one app rather than a menu, pin it: long-press its row in the launcher (or send `pin /apps/clock.js`). The board then boots straight into that script with no home button drawn over it. A long-press of **BOOT** still opens the launcher, which is where you release the pin.
+
 Two ways to ship a script:
 
 - **SD card:** copy [`lang-js/app/app.js`](../../lang-js/app/app.js) to the root of a FAT-formatted microSD, insert it, long-press **BOOT** (≥ 700 ms). The card is re-mounted on every reload, so it can be swapped while the board is powered, and it always wins over the flash partition.
@@ -43,6 +45,8 @@ While js-host runs, the serial port accepts one line at a time:
 |---|---|
 | `home` | open the launcher (same as the on-screen home button, or a BOOT long-press) |
 | `reload` | restart the current app from storage |
+| `pin [path]` | boot straight into this app from now on and drop the home button. With no path it pins whatever is running |
+| `unpin` | back to booting the launcher |
 | `ls [dir]` | list a directory, default `/` |
 | `rm <path>` | delete a file |
 | `app-begin [path]` … `app-end` | receive a script and write it, then run it. With no path it replaces whatever is running, which is the usual edit loop; give a path to add a new app, e.g. `app-begin /apps/clock.js`. 256 KB cap |

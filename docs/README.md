@@ -30,6 +30,7 @@ Organized to mirror the repo's per-language `lang-*/` directories (see the [top-
 | [lang-js/binding-api.md](lang-js/binding-api.md) | The JavaScript API exposed to app.js (lv/sys/wifi/console), props reference, and the GC ownership rules |
 | [lang-js/portability.md](lang-js/portability.md) | What the runtime actually requires (PSRAM, flash, LVGL 9), which ESP32 variants qualify, why screen size is not a constraint, and the three-hook porting contract |
 | [lang-js/engine-notes.md](lang-js/engine-notes.md) | QuickJS-ng on this board: spike measurements, the heap-poisoning/usable_size trap, the job pump, the Xtensa type patches, the DTR/RTS bootloader trap |
+| [lang-js/cyd-target.md](lang-js/cyd-target.md) | The second board (ESP32-2432S028R, no PSRAM): how targets are selected, the internal-RAM memory budget, the IRAM allocator trap, and the open touch bug that still blocks it |
 
 Start with [`BUILDING.md`](../BUILDING.md) at the repo root for setup + deployment of either demo; come here for the deeper "how does this actually work" material.
 

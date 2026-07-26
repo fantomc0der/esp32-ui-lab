@@ -14,9 +14,13 @@ The counterpart to [`lang-c/portability.md`](../lang-c/portability.md), answerin
 
 ## Hard requirements
 
-**PSRAM, effectively mandatory.** The allocator passes `MALLOC_CAP_SPIRAM` unconditionally, so on a chip without PSRAM the runtime fails to start. Falling back to internal RAM is a one-line change, but the ESP32-S3 has only ~300 KB of internal SRAM with LVGL's draw buffers already competing for it, so a JS heap there would be cramped. Treat PSRAM as required.
+**PSRAM, strongly preferred but no longer mandatory.** The allocator's capability flag is now per-target (`JS_HEAP_CAPS`), and the runtime has been shown to start and evaluate scripts from internal RAM on a PSRAM-less classic ESP32 — see [cyd-target.md](cyd-target.md) for the measurements and what it costs.
 
-This is what excludes the **ESP32-C3 and C6** (no PSRAM at all). It includes the **S3**, the **S2 with PSRAM**, and the classic **WROVER** modules.
+What it costs is most of your headroom. The VM takes ~66 KB to stand up even with the intrinsic set trimmed, and on that board only ~22 KB was left for scripts after LVGL, WiFi and the SD driver took theirs: enough for a 1.5 KB launcher, not enough for a 4.5 KB app. A board without PSRAM will run small scripts and will not run large ones.
+
+Two hard requirements if you try it. The heap caps must be `MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA`, since bare `MALLOC_CAP_INTERNAL` can return IRAM that QuickJS's byte-level writes fault on. And the draw buffers, LVGL's static pool and the loop-task stack all come from the same pool the JS heap does, so each is a lever and each is also a competitor.
+
+This still excludes the **ESP32-C3 and C6** on flash size and RAM rather than PSRAM alone. It includes the **S3**, the **S2 with PSRAM**, the classic **WROVER** modules, and — with the caveats above — classic ESP32 modules without PSRAM.
 
 **Flash: 4 MB realistically, 8–16 MB comfortably.** The engine alone is ~429 KB, plus LVGL, plus the Arduino core and WiFi stack. This project's firmware is 1.79 MB. The default 4 MB partition scheme gives roughly 1.2 MB of app space, which is not enough, so a custom partition scheme is part of any port.
 

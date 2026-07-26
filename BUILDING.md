@@ -43,6 +43,12 @@ cd lang-js; .\flash.ps1
 
 Flash the js-host runtime once; after that the UI is an `app.js` file you deploy as data — SD card + BOOT long-press, or pasted over serial — with no recompile. Builds differ from the C sketch only in linking two libraries that sit beside it (the JS engine and the LVGL bindings) with `--library`. Details (manual CLI, deploying app.js, the serial REPL and upload protocol, expected boot log): [`docs/lang-js/build-and-deploy.md`](docs/lang-js/build-and-deploy.md).
 
+## CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) compiles both sketches on every push and pull request, using the same pinned versions listed above, and checks the JavaScript: every script is syntax-checked, and [`tools/check-js-api.mjs`](tools/check-js-api.mjs) fails the build if a script calls a binding the C layer doesn't actually register — the mistake that would otherwise only surface on the device.
+
+What CI cannot do is run the real test suite. [`lang-js/app/selftest.js`](lang-js/app/selftest.js) executes on the board and reports over serial, so it needs hardware; a hosted runner has none. Run it yourself after any change to the binding layer (see [`docs/lang-js/build-and-deploy.md`](docs/lang-js/build-and-deploy.md)), or attach a board to a self-hosted runner if you want it automated.
+
 ## If something misbehaves
 
 The three that account for nearly all bring-up pain: a **charge-only USB cable** enumerates nothing at all (no error, just silence); **only one process can hold the COM port**, so close any monitor before uploading; and if an upload can't connect, hold BOOT, tap RESET, release BOOT, and retry (the COM number often changes in bootloader mode). The full Windows serial survival guide — phantom ports, scripted capture, the DTR/RTS trap that can park the chip in the ROM bootloader — is in [`docs/lang-c/build-and-flash.md`](docs/lang-c/build-and-flash.md) and [`docs/lang-js/engine-notes.md`](docs/lang-js/engine-notes.md).

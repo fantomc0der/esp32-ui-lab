@@ -32,17 +32,29 @@ constexpr uint8_t kCmdX = 0xD0;
 constexpr uint8_t kCmdY = 0x90;
 constexpr uint8_t kCmdZ = 0xB0;
 
-// The panel is on its own SPI bus, separate from the display's HSPI, so it
-// never contends with a flush in progress.
-SPIClass g_spi(VSPI);
+// The panel shares VSPI with the microSD card (the display has HSPI to itself),
+// so the bus object lives in shared_spi and both devices take turns on it.
+SPIClass &g_spi = shared_spi::bus;
 bool g_present = false;
+
+// Tag identifying this driver as the bus owner. Only its address matters.
+const char kBusOwner[] = "xpt2046";
 
 // Takes the shared bus (see shared_spi.h — the SD card is on this peripheral
 // too). Called once per poll rather than per sample: a poll costs up to nine
 // samples, and shared_spi::claim() is a no-op when we already hold the pins.
 void claimBus() {
-  shared_spi::claim(g_spi, &g_spi, TOUCH_PIN_CLK, TOUCH_PIN_MISO, TOUCH_PIN_MOSI,
+  const bool reclaimed = shared_spi::owner() != kBusOwner;
+  shared_spi::claim(kBusOwner, TOUCH_PIN_CLK, TOUCH_PIN_MISO, TOUCH_PIN_MOSI,
                     TOUCH_PIN_CS);
+  // begin() detaches and reattaches the bus pins but never touches SS as a GPIO
+  // (it only records it; hardware CS is opt-in via setHwCs, which we never
+  // call). Re-assert CS as an idle-high output whenever the bus changes hands,
+  // since end() ran in between and this driver drives CS itself.
+  if (reclaimed) {
+    pinMode(TOUCH_PIN_CS, OUTPUT);
+    digitalWrite(TOUCH_PIN_CS, HIGH);
+  }
 }
 
 uint16_t readOnce(uint8_t cmd) {
@@ -74,10 +86,8 @@ uint16_t readMedian(uint8_t cmd, int n) {
 }  // namespace
 
 bool touch_begin() {
-  pinMode(TOUCH_PIN_CS, OUTPUT);
-  digitalWrite(TOUCH_PIN_CS, HIGH);
+  claimBus();  // also sets CS up as an output
   pinMode(TOUCH_PIN_IRQ, INPUT);
-  claimBus();
 
   // There is no ID register to interrogate, so presence is inferred from the
   // converter behaving like a converter: with nothing touching it, Z must read
@@ -101,7 +111,12 @@ bool touch_read(uint16_t *x, uint16_t *y) {
   static uint32_t last_dbg = 0;
   if (millis() - last_dbg > 500) {
     last_dbg = millis();
-    Serial.printf("[touch] z=%u (threshold %u)\n", z, TOUCH_Z_THRESHOLD);
+    // IRQ is the independent witness: the XPT2046 pulls PENIRQ low on contact
+    // without any SPI involvement. irq=0 with z=0 means the panel senses a touch
+    // and the SPI read is at fault; irq=1 throughout means no contact is
+    // reaching the panel at all.
+    Serial.printf("[touch] z=%u irq=%d (threshold %u)\n", z,
+                  digitalRead(TOUCH_PIN_IRQ), TOUCH_Z_THRESHOLD);
   }
 #endif
   if (z <= TOUCH_Z_THRESHOLD) return false;

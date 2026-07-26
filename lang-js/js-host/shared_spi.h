@@ -30,25 +30,45 @@
 
 namespace shared_spi {
 
+// ONE SPIClass for the peripheral, shared by every device on it.
+//
+// Two SPIClass objects on one peripheral is the trap: each keeps its own `_spi`
+// handle, so the second one's begin() sees `_spi == NULL`, calls spiStartBus() on
+// an already-running bus, and the two then disagree about who owns what. Sharing
+// a single object keeps that state in one place — the only thing that varies per
+// device is which pins the matrix points at.
+inline SPIClass bus(VSPI);
+
 // Which device currently owns the pin matrix. Compared by identity, so each
 // device just needs a stable unique tag.
 inline const void *g_owner = nullptr;
 
-// Points `bus` at `sck`/`miso`/`mosi`/`ss` unless `owner` already holds it.
+// Points the bus at `sck`/`miso`/`mosi` unless `owner` already holds it.
 //
-// end() before begin() is REQUIRED, not belt-and-braces: SPIClass::begin() opens
-// with `if (_spi) return true;`, so on an already-started bus it returns success
-// having changed nothing at all. Calling begin() alone to re-assert pins is a
-// silent no-op — the reason an earlier version of this file did nothing and touch
-// kept reading 0x1FFF (MISO idle high) after the card was mounted. end() releases
-// the bus so the following begin() actually rewrites the pin matrix.
-inline void claim(SPIClass &bus, const void *owner, int8_t sck, int8_t miso,
-                  int8_t mosi, int8_t ss) {
+// Re-attaches the pins WITHOUT stopping the peripheral. The obvious
+// implementation — end() then begin() — is wrong twice over: begin() alone is a
+// silent no-op on a running bus (`if (_spi) return true;`), while end() calls
+// spiStopBus(), so the pair tears the peripheral down and rebuilds it on every
+// change of owner. That left the XPT2046 reading a constant zero: contact was
+// detected on PENIRQ, but each conversion ran on a just-restarted bus and came
+// back empty. spiAttach* moves the pin matrix and leaves the bus running.
+inline void claim(const void *owner, int8_t sck, int8_t miso, int8_t mosi,
+                  int8_t ss) {
   if (g_owner == owner) return;
-  bus.end();
-  bus.begin(sck, miso, mosi, ss);
+  if (spi_t *hw = bus.bus()) {
+    spiAttachSCK(hw, sck);
+    spiAttachMISO(hw, miso);
+    spiAttachMOSI(hw, mosi);
+  } else {
+    bus.begin(sck, miso, mosi, ss);  // first claim: nothing started yet
+  }
   g_owner = owner;
 }
+
+// Who currently holds the pins. Lets a caller tell whether the next claim() will
+// actually reconfigure the bus, which matters when it also has to restore pin
+// modes that begin() would have clobbered (e.g. a software chip-select).
+inline const void *owner() { return g_owner; }
 
 // Call when a device may have reconfigured the bus behind our back (e.g. a
 // library's own begin()), so the next claim() is forced to re-assert.

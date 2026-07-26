@@ -37,16 +37,16 @@ inline bool g_sd_ok = false;
 inline bool g_flash_ok = false;
 
 #if BOARD_HAS_SD_SPI
-// The card shares this peripheral with the touch controller; see shared_spi.h
-// for why there is no third bus and how the two take turns.
-inline SPIClass g_sd_spi(VSPI);
+// The card shares the peripheral with the touch controller, using the SAME
+// SPIClass object — see shared_spi.h for why a second object on one bus breaks
+// both devices.
+inline const char kBusOwner[] = "sdcard";
 
 // Point the bus at the card. The SD library only calls beginTransaction() and
 // never re-asserts pins, so anything that reads or writes the card has to do
 // this first or the transfer goes out on the touch controller's pins.
 inline void claimBus() {
-  shared_spi::claim(g_sd_spi, &g_sd_spi, SD_PIN_SCK, SD_PIN_MISO, SD_PIN_MOSI,
-                    SD_PIN_CS);
+  shared_spi::claim(kBusOwner, SD_PIN_SCK, SD_PIN_MISO, SD_PIN_MOSI, SD_PIN_CS);
 }
 #else
 inline void claimBus() {}  // dedicated bus (SDMMC): nothing to arbitrate
@@ -64,10 +64,11 @@ inline void begin() {
   SD_MMC.setPins(SD_PIN_CLK, SD_PIN_CMD, SD_PIN_D0, SD_PIN_D1, SD_PIN_D2, SD_PIN_D3);
   g_sd_ok = SD_MMC.begin("/sdcard", false /* 4-bit */) && SD_MMC.cardType() != CARD_NONE;
 #elif BOARD_HAS_SD_SPI
-  g_sd_spi.begin(SD_PIN_SCK, SD_PIN_MISO, SD_PIN_MOSI, SD_PIN_CS);
-  g_sd_ok = SD.begin(SD_PIN_CS, g_sd_spi) && SD.cardType() != CARD_NONE;
-  // SD.begin() reconfigures the bus itself, so the recorded owner is stale
-  // regardless of what it says: force the next claim to re-assert.
+  claimBus();
+  g_sd_ok = SD.begin(SD_PIN_CS, shared_spi::bus) && SD.cardType() != CARD_NONE;
+  // SD.begin() calls begin() on the bus itself, so what the pin matrix holds is
+  // no longer necessarily what the cache says. Force the next claim to re-assert
+  // rather than trust it.
   shared_spi::invalidate();
 #endif
 

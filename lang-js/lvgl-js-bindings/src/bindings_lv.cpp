@@ -383,6 +383,9 @@ static const struct { const char *name; lv_event_code_t code; } kEvents[] = {
     {"change", LV_EVENT_VALUE_CHANGED},
     {"pressing", LV_EVENT_PRESSING},
     {"press", LV_EVENT_PRESSED},
+    // Fires while the finger is still down. LVGL sends "click" as well when it
+    // lifts, so a handler that wants only the long press has to say so.
+    {"longpress", LV_EVENT_LONG_PRESSED},
     // Emitted by the on-screen keyboard's tick and cross keys.
     {"ready", LV_EVENT_READY},
     {"cancel", LV_EVENT_CANCEL},
@@ -402,7 +405,7 @@ static JSValue js_widget_on(JSContext *ctx, JSValueConst this_val, int argc, JSV
   }
   JS_FreeCString(ctx, name);
   if (code == LV_EVENT_ALL)
-    return JS_ThrowTypeError(ctx, "unknown event (click/change/press/pressing/ready/cancel)");
+    return JS_ThrowTypeError(ctx, "unknown event (click/change/press/pressing/longpress/ready/cancel)");
 
   // The core takes ownership of the callback from here.
   if (!jsvm_bind_event(ctx, obj, code, argv[1], this_val))

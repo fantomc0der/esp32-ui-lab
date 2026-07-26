@@ -11,6 +11,11 @@
 const CONFIG = "/config/weather.json";
 const CACHE = "/cache/weather.json";
 const REFRESH_MS = 10 * 60 * 1000;
+// The radio is usually still associating when this script starts — more so on a
+// board pinned to it, which reaches the first update seconds after power-on. So
+// "not connected" at boot means "not yet", and is worth asking about again
+// shortly rather than sitting on a stale screen for a full refresh interval.
+const RETRY_MS = 3000;
 
 const place = (() => {
   const fallback = { name: "Berlin", lat: 52.52, lon: 13.41 };
@@ -48,6 +53,7 @@ const wind = lv.label(scr, { align: "bottom-left", x: 14, y: -10, font: 14, colo
 // ---------------------------------------------------------------- rendering
 
 let lastUpdate = 0;
+let waitingForWifi = null;  // the retry timer, only alive while offline
 
 function render(data, source) {
   temp.set({ text: `${Math.round(data.temp)}°` });
@@ -77,7 +83,17 @@ async function update() {
   const net = wifi.status();
   if (!net.connected) {
     state.set({ text: "offline", color: "#FF8A65" });
+    // Keep asking until the radio comes up, whether that is eight seconds after
+    // boot or an hour after the router came back. Only wifi.status() is polled,
+    // which is a local driver read, not a request.
+    if (!waitingForWifi) waitingForWifi = lv.timer(RETRY_MS, update);
     return;
+  }
+  // Safe to stop from in here: this call may be the retry timer's own callback,
+  // and the binding layer holds its references for the duration of the call.
+  if (waitingForWifi) {
+    waitingForWifi.stop();
+    waitingForWifi = null;
   }
 
   state.set({ text: "updating", color: "#5A7285" });

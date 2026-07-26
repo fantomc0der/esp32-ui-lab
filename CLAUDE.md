@@ -58,7 +58,7 @@ What CI *cannot* do: run `lang-js/app/selftest.js`, the real functional test —
 - `js-host/` — the firmware: hardware bring-up (identical to `lang-c/app`), the script loader/reload path, and the serial REPL/upload protocol. Its hardware glue files (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) are **verbatim copies from `lang-c/app`** — always fix hardware bugs in `lang-c` first, then re-copy, so there's a single source of truth.
 - `app/app.js` — the launcher script shipped to the board; `app/apps/*.js` — individual apps (`sys.launch(path)` switches between them); `app/selftest.js` — the on-hardware binding-layer test, deployed in place of `app.js`.
 
-Script boot order: `/app.js` on the SD card → `/app.js` on the flash FATFS partition → a built-in fallback screen. Edit loop: edit on PC → reinsert card → long-press BOOT (≥700 ms) to reload, no recompile.
+Script boot order: the pinned app if one is set (`sys.pin()` / the `pin` serial command, stored in NVS) → `/app.js` on the SD card → `/app.js` on the flash FATFS partition → a built-in fallback screen. A pin also suppresses the firmware's home button, so BOOT long-press is the only way back to the launcher on a pinned board. Edit loop: edit on PC → reinsert card → long-press BOOT (≥700 ms) to reload, no recompile.
 
 **JS binding surface** (`lv`, `sys`, `fs`, `wifi`, `fetch`, `console` — full reference in `docs/lang-js/binding-api.md`): about twenty curated LVGL calls, not a full binding. Key invariants when changing the binding layer (`lang-js/lvgl-js-bindings/src`):
 - Callbacks passed to `.on()`/`lv.timer()` are retained with `JS_DupValue` and released exactly once, via an `LV_EVENT_DELETE` hook or `.stop()`.

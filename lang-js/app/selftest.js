@@ -202,10 +202,35 @@ check("sys.launch exists and defers", () => {
   return typeof sys.launch === "function";
 });
 
+// ---------------------------------------------------------------- pinning
+// Writes NVS, so put back whatever was pinned before the test ran.
+const pinnedBefore = sys.pinned();
+
+check("sys.pinned reports a path or null", () =>
+  pinnedBefore === null || typeof pinnedBefore === "string");
+
+check("pin/pinned/unpin round-trip", () => {
+  const p = "/apps/selftest-pin.js";
+  const set = sys.pin(p) && sys.pinned() === p;
+  const cleared = sys.unpin() && sys.pinned() === null;
+  return set && cleared;
+});
+
+check("pin() rejects a relative path", () => threw(() => sys.pin("apps/x.js")));
+check("pin() rejects a missing argument", () => threw(() => sys.pin()));
+
+if (pinnedBefore) sys.pin(pinnedBefore);
+check("the pin the board had is back", () => sys.pinned() === pinnedBefore);
+
 // ---------------------------------------------------------------- events
 check("on() returns the widget", () => {
   const b = lv.button(panel, { text: "e", w: 20, h: 20 });
   return b.on("click", () => {}) === b;
+});
+
+check("on() accepts longpress", () => {
+  const b = lv.button(panel, { text: "l", w: 20, h: 20 });
+  return b.on("longpress", () => {}) === b;
 });
 
 // ---------------------------------------------------------------- sys / console

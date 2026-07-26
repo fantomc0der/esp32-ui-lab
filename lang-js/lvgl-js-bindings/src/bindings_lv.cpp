@@ -81,12 +81,21 @@ static const struct { const char *name; lv_align_t code; } kAligns[] = {
     {"right-mid", LV_ALIGN_RIGHT_MID},
 };
 
+// Only sizes compiled into the firmware are reachable; anything else is
+// ignored so a script degrades rather than throwing. Add a size by enabling
+// LV_FONT_MONTSERRAT_<n> in lv_conf.h and adding a case here.
 static const lv_font_t *font_by_size(int px) {
   switch (px) {
     case 14: return &lv_font_montserrat_14;
     case 16: return &lv_font_montserrat_16;
     case 20: return &lv_font_montserrat_20;
-    default: return nullptr;  // only the three compiled-in sizes
+#if LV_FONT_MONTSERRAT_28
+    case 28: return &lv_font_montserrat_28;
+#endif
+#if LV_FONT_MONTSERRAT_40
+    case 40: return &lv_font_montserrat_40;
+#endif
+    default: return nullptr;
   }
 }
 
@@ -118,6 +127,11 @@ static void widget_set_value(lv_obj_t *obj, JSContext *ctx, JSValueConst v) {
   } else if (lv_obj_check_type(obj, &lv_switch_class)) {
     if (JS_ToBool(ctx, v)) lv_obj_add_state(obj, LV_STATE_CHECKED);
     else lv_obj_remove_state(obj, LV_STATE_CHECKED);
+  } else if (lv_obj_check_type(obj, &lv_textarea_class)) {
+    // A text field's "value" is its text, which is what a script wants back
+    // from .value() after the user has typed.
+    const char *s = JS_ToCString(ctx, v);
+    if (s) { lv_textarea_set_text(obj, s); JS_FreeCString(ctx, s); }
   }
 }
 
@@ -331,6 +345,28 @@ static void apply_props(JSContext *ctx, lv_obj_t *obj, JSValueConst props) {
     if (has(v)) { JS_ToInt32(ctx, &n, v); lv_tabview_set_tab_bar_size(obj, n); }
     JS_FreeValue(ctx, v);
   }
+
+  if (lv_obj_check_type(obj, &lv_textarea_class)) {
+    v = get("placeholder");
+    if (has(v)) {
+      const char *s = JS_ToCString(ctx, v);
+      if (s) { lv_textarea_set_placeholder_text(obj, s); JS_FreeCString(ctx, s); }
+    }
+    JS_FreeValue(ctx, v);
+
+    // Masks typed characters — the reason a password field is not just a label.
+    v = get("password");
+    if (has(v)) lv_textarea_set_password_mode(obj, JS_ToBool(ctx, v));
+    JS_FreeValue(ctx, v);
+
+    v = get("oneLine");
+    if (has(v)) lv_textarea_set_one_line(obj, JS_ToBool(ctx, v));
+    JS_FreeValue(ctx, v);
+
+    v = get("maxLength");
+    if (has(v)) { JS_ToInt32(ctx, &n, v); lv_textarea_set_max_length(obj, n); }
+    JS_FreeValue(ctx, v);
+  }
 }
 
 // ---------------------------------------------------------------- widget methods
@@ -347,6 +383,9 @@ static const struct { const char *name; lv_event_code_t code; } kEvents[] = {
     {"change", LV_EVENT_VALUE_CHANGED},
     {"pressing", LV_EVENT_PRESSING},
     {"press", LV_EVENT_PRESSED},
+    // Emitted by the on-screen keyboard's tick and cross keys.
+    {"ready", LV_EVENT_READY},
+    {"cancel", LV_EVENT_CANCEL},
 };
 
 static JSValue js_widget_on(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -363,7 +402,7 @@ static JSValue js_widget_on(JSContext *ctx, JSValueConst this_val, int argc, JSV
   }
   JS_FreeCString(ctx, name);
   if (code == LV_EVENT_ALL)
-    return JS_ThrowTypeError(ctx, "unknown event (use click/change/pressing/press)");
+    return JS_ThrowTypeError(ctx, "unknown event (click/change/press/pressing/ready/cancel)");
 
   // The core takes ownership of the callback from here.
   if (!jsvm_bind_event(ctx, obj, code, argv[1], this_val))
@@ -381,6 +420,10 @@ static JSValue js_widget_value(JSContext *ctx, JSValueConst this_val, int argc, 
   if (lv_obj_check_type(obj, &lv_slider_class)) return JS_NewInt32(ctx, lv_slider_get_value(obj));
   if (lv_obj_check_type(obj, &lv_arc_class)) return JS_NewInt32(ctx, lv_arc_get_value(obj));
   if (lv_obj_check_type(obj, &lv_switch_class)) return JS_NewBool(ctx, lv_obj_has_state(obj, LV_STATE_CHECKED));
+  if (lv_obj_check_type(obj, &lv_textarea_class)) {
+    const char *s = lv_textarea_get_text(obj);
+    return JS_NewString(ctx, s ? s : "");
+  }
   return JS_UNDEFINED;
 }
 
@@ -423,6 +466,20 @@ static JSValue js_widget_push(JSContext *ctx, JSValueConst this_val, int argc, J
   return JS_DupValue(ctx, this_val);
 }
 
+// keyboard.target(textarea) — routes typing into that field. LVGL wires the
+// key handling, so a script never sees individual keystrokes.
+static JSValue js_widget_target(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  lv_obj_t *obj = jsvm_arg_widget(ctx, this_val);
+  if (!obj) return JS_EXCEPTION;
+  if (!lv_obj_check_type(obj, &lv_keyboard_class))
+    return JS_ThrowTypeError(ctx, "target() only works on lv.keyboard widgets");
+  if (argc < 1) return JS_ThrowTypeError(ctx, "target(textarea) needs a widget");
+  lv_obj_t *ta = jsvm_arg_widget(ctx, argv[0]);
+  if (!ta) return JS_EXCEPTION;
+  lv_keyboard_set_textarea(obj, ta);
+  return JS_DupValue(ctx, this_val);
+}
+
 // widget.clean() — delete all children (their event bindings are released by
 // the LV_EVENT_DELETE hooks)
 static JSValue js_widget_clean(JSContext *ctx, JSValueConst this_val, int, JSValueConst *) {
@@ -450,7 +507,8 @@ static JSValue js_widget_bounds(JSContext *ctx, JSValueConst this_val, int, JSVa
 
 // ---------------------------------------------------------------- constructors
 
-enum WidgetKind { W_OBJ, W_BUTTON, W_LABEL, W_SLIDER, W_SWITCH, W_ARC, W_LIST, W_CHART, W_TABVIEW };
+enum WidgetKind { W_OBJ, W_BUTTON, W_LABEL, W_SLIDER, W_SWITCH, W_ARC, W_LIST, W_CHART,
+                  W_TABVIEW, W_TEXTAREA, W_KEYBOARD };
 
 static JSValue js_lv_make(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv, int magic) {
   if (argc < 1) return JS_ThrowTypeError(ctx, "widget(parent, props?) needs a parent");
@@ -467,7 +525,9 @@ static JSValue js_lv_make(JSContext *ctx, JSValueConst, int argc, JSValueConst *
     case W_ARC:     obj = lv_arc_create(parent); break;
     case W_LIST:    obj = lv_list_create(parent); break;
     case W_CHART:   obj = lv_chart_create(parent); break;
-    case W_TABVIEW: obj = lv_tabview_create(parent); break;
+    case W_TABVIEW:  obj = lv_tabview_create(parent); break;
+    case W_TEXTAREA: obj = lv_textarea_create(parent); break;
+    case W_KEYBOARD: obj = lv_keyboard_create(parent); break;
   }
   if (!obj) return JS_ThrowInternalError(ctx, "widget create failed");
   if (argc >= 2) apply_props(ctx, obj, argv[1]);
@@ -516,6 +576,7 @@ void js_install_lv(JSContext *ctx) {
   JS_SetPropertyStr(ctx, wproto, "add", JS_NewCFunction(ctx, js_widget_add, "add", 1));
   JS_SetPropertyStr(ctx, wproto, "addTab", JS_NewCFunction(ctx, js_widget_add_tab, "addTab", 1));
   JS_SetPropertyStr(ctx, wproto, "push", JS_NewCFunction(ctx, js_widget_push, "push", 1));
+  JS_SetPropertyStr(ctx, wproto, "target", JS_NewCFunction(ctx, js_widget_target, "target", 1));
   JS_SetPropertyStr(ctx, wproto, "clean", JS_NewCFunction(ctx, js_widget_clean, "clean", 0));
   JS_SetPropertyStr(ctx, wproto, "bounds", JS_NewCFunction(ctx, js_widget_bounds, "bounds", 0));
   JS_SetClassProto(ctx, jsvm_widget_class, wproto);
@@ -526,7 +587,7 @@ void js_install_lv(JSContext *ctx) {
   static const struct { const char *name; WidgetKind kind; } kMakers[] = {
       {"obj", W_OBJ}, {"button", W_BUTTON}, {"label", W_LABEL}, {"slider", W_SLIDER},
       {"switch", W_SWITCH}, {"arc", W_ARC}, {"list", W_LIST}, {"chart", W_CHART},
-      {"tabview", W_TABVIEW},
+      {"tabview", W_TABVIEW}, {"textarea", W_TEXTAREA}, {"keyboard", W_KEYBOARD},
   };
   for (auto &m : kMakers) {
     JS_SetPropertyStr(ctx, lv, m.name,

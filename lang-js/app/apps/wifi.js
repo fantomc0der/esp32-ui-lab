@@ -77,8 +77,20 @@ function showPassword(ssid) {
   lv.label(scr, { align: "top-left", x: 10, y: 4, font: 16, color: "#F0F4F8", text: ssid });
 
   const field = lv.textarea(scr, {
-    w: 300, h: 34, align: "top-mid", y: 26,
+    w: 240, h: 34, align: "top-left", x: 10, y: 26,
     placeholder: "password", password: true, oneLine: true, maxLength: 63,
+  });
+
+  // Typing a long password blind on a 320x172 panel is how you end up entering
+  // it three times. LVGL reveals each character for 1.5 s as it is typed, which
+  // helps while typing but not when checking what you already have, so this
+  // unmasks the whole field.
+  let masked = true;
+  const reveal = lv.button(scr, { w: 60, h: 34, align: "top-right", x: -10, y: 26, text: "Show" });
+  reveal.on("click", () => {
+    masked = !masked;
+    field.set({ password: masked });
+    reveal.set({ text: masked ? "Show" : "Hide" });
   });
 
   // The keyboard stops short of the right edge so it does not sit underneath

@@ -53,12 +53,13 @@ void jsvm_report_exception() {
   Serial.printf("[js] ERROR: %s\n", msg ? msg : "(unprintable)");
   JS_FreeCString(jsvm_ctx, msg);
 
-  // A thrown null or undefined is not a script error: QuickJS reports an
-  // internal allocation failure that way, with no Error object and no stack.
-  // Say so and print the pool, because a bare "ERROR: null" reads like a bug in
-  // the script and sends you looking in entirely the wrong place.
+  // A thrown null or undefined carries no stack, so the line above is the whole
+  // message. Usually that is a script's own `throw null` or a promise rejected
+  // with no argument, but it is also how a failure deep enough that the engine
+  // could not allocate the Error object to describe it comes out. The heap
+  // reading is what tells those apart.
   if (JS_IsNull(exc) || JS_IsUndefined(exc)) {
-    Serial.printf("[js]   (no Error object — usually allocation failure; %u bytes free, largest block %u)\n",
+    Serial.printf("[js]   (no Error object — a bare throw, or an allocation failure; %u bytes free, largest block %u)\n",
                   heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                   heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
   }

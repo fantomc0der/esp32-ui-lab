@@ -48,19 +48,17 @@ const scr = lv.screen().set({ bg: "#0E1A24", pad: 0, scroll: false });
 // shrinks to a fraction of a small screen nor grows past the largest font that
 // exists. Adapting is done with alignment instead — every element hangs off an
 // edge or the middle, so the slack on a bigger panel goes into the margins.
-//
-// The firmware's corner button is 34px in the bottom-right; the status text
-// stays clear of it.
-const CORNER = 46;
+// Nothing here is tappable except the screen itself, so the firmware's corner
+// button covers no control and needs no clearance.
 
 lv.label(scr, { align: "top-left", x: 12, y: 10, font: 16, color: "#7FA8C4", text: place.name });
-const state = lv.label(scr, { align: "top-right", x: -CORNER, y: 12, font: 14, color: "#5A7285", text: "" });
+const state = lv.label(scr, { align: "top-right", x: -12, y: 12, font: 14, color: "#5A7285", text: "" });
 
-// The three readings are one block, centred vertically as a group. Anchoring the
-// number to the middle and the other two to the bottom edge (as this did) opens a
-// gap through the middle of a taller panel. All three hang off "left-mid" with
-// fixed spacing instead, and the offsets are shifted up by half the block's
-// height so the slack splits evenly above and below it on any panel.
+// The three readings are one block. All three hang off "left-mid" with fixed
+// spacing, offset up by half the block's height, so the group stays centred and
+// the slack on a taller panel splits evenly above and below it. Splitting the
+// anchors — the number at mid-height, the smaller lines on the bottom edge —
+// would instead open a gap through the middle as the panel grows.
 const temp = lv.label(scr, { align: "left-mid", x: 12, y: -28, font: 40, color: "#FFFFFF", text: "--°" });
 const condition = lv.label(scr, { align: "left-mid", x: 14, y: 16, font: 20, color: "#C8D8E4", text: "" });
 const wind = lv.label(scr, { align: "left-mid", x: 14, y: 42, font: 14, color: "#5A7285", text: "" });

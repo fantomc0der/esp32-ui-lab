@@ -12,8 +12,9 @@ const scr = lv.screen().set({ bg: "#0B1622", pad: 0, scroll: false });
 // offsets (fonts are fixed bitmaps, so a 16px line is 16px on any panel) but
 // size their lists, keyboard and buttons from what is actually there.
 const S = lv.size();
-// The firmware's corner button is 34px in the bottom-right, and nothing here
-// should sit under it.
+// The firmware draws a 34px button in the bottom-right of every screen. Anything
+// tappable that reaches into that corner is partly unreachable, so the keyboard,
+// the buttons and the scan list all stop short of it.
 const CORNER = 40;
 
 // Rebuilding the screen from inside a click handler would delete the very
@@ -89,9 +90,15 @@ function showStatus() {
 function showScan() {
   reset();
   header("Choose a network");
-  const note = lv.label(scr, { align: "top-right", x: -CORNER, y: 14, font: 14, color: "#64798C", text: "scanning..." });
-  // Everything below the header, which is one 20px line plus its margin.
-  const list = lv.list(scr, { w: "94%", h: S.h - 44, align: "bottom-mid", y: -5, bg: "#101E2C", border: 0, radius: 8 });
+  const note = lv.label(scr, { align: "top-right", x: -12, y: 14, font: 14, color: "#64798C", text: "scanning..." });
+  // Everything below the header, which is one 20px line plus its margin. Anchored
+  // bottom-left and stopping short of the corner button, so the last row is not
+  // partly underneath it — a row you can see but only half tap is worse than a
+  // slightly narrower list.
+  const list = lv.list(scr, {
+    w: S.w - CORNER - 10, h: S.h - 44, align: "bottom-left", x: 10, y: -5,
+    bg: "#101E2C", border: 0, radius: 8,
+  });
 
   wifi.scan(nets => {
     if (!nets) { note.set({ text: "scan failed" }); return; }

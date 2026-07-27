@@ -10,7 +10,7 @@ The counterpart to [`lang-c/portability.md`](../lang-c/portability.md), answerin
 | `quickjs-ng/src/` | vendored | **0%** — plain C, five Xtensa type patches (see [engine-notes.md](engine-notes.md)). |
 | `js-host/js-host.ino` | 332 | **~35%** — display construction, pin use, SD_MMC wiring, and the three host hooks. The loader, reload, and serial protocol are policy you'd likely keep. |
 | `js-host/` hardware headers | — | **100%** — verbatim copies from `lang-c/`; see its [portability doc](../lang-c/portability.md). |
-| `app/app.js` and `app/apps/` | ~600 | **~95%** — geometry is derived from `lv.size()`, percentages and alignment rather than written for 320×172. What remains board-specific is the pixel heights of things holding text, since fonts do not scale. |
+| `app/app.js` and `app/apps/` | 555 | **~85%** — geometry is derived from `lv.size()`, percentages and alignment rather than written for 320×172, so the apps fill a different panel instead of sitting in a corner of it. The residual 15% is the pixel constants that are tuned to font metrics (a header's height, the gap between two lines), and they are load-bearing: a panel small enough to crowd them still needs a look. |
 
 ## Hard requirements
 

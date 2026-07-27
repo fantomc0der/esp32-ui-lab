@@ -35,8 +35,14 @@ const chart = lv.chart(left, {
 
 const right = lv.obj(vitals, { w: "40%", h: "100%", align: "right-mid", pad: 4, scroll: false });
 // An arc has to stay square, so it is the smaller of what the column and the
-// height allow rather than a percentage of either.
-const ARC = Math.max(60, Math.min((S.w * 0.36) | 0, (TAB_H * 0.6) | 0));
+// height allow. The width comes from the column's own content area rather than a
+// fraction of the screen: 40% of the tab is not what the arc can occupy once the
+// pad and the theme's card border have taken theirs, and guessing at that
+// overflowed the column on a taller panel. The column does not scroll, so an
+// oversized arc is clipped rather than reachable.
+// The `|| ` guards a zero: bounds() forces a layout pass, but a container that
+// somehow measured empty would otherwise size the arc to nothing at all.
+const ARC = Math.min(right.bounds().w || ((S.w * 0.3) | 0), (TAB_H * 0.6) | 0);
 const loadArc = lv.arc(right, {
   w: ARC, h: ARC, align: "top-mid",
   range: [0, 100], rotation: 135, angles: [0, 270], knob: false,
@@ -68,7 +74,8 @@ const wifiTab = tabs.addTab("WiFi").set({ pad: 4, scroll: false });
 const SCAN_W = 84;
 const scanBtn = lv.button(wifiTab, { w: SCAN_W, h: 30, align: "top-left", text: "Scan" });
 const wifiStatus = lv.label(wifiTab, { align: "top-left", x: SCAN_W + 8, y: 8, font: 14, text: "idle" });
-const wifiList = lv.list(wifiTab, { w: "100%", h: TAB_H - 36, align: "bottom-mid" });
+// Stops short of the firmware's 34px corner button, so no row is half under it.
+const wifiList = lv.list(wifiTab, { w: S.w - 48, h: TAB_H - 36, align: "bottom-left" });
 
 function doScan() {
   const started = wifi.scan(nets => {

@@ -80,6 +80,8 @@ const chart = lv.chart(box, { w: "100%", h: "70%", points: Math.max(20, (S.w / 8
 
 The pattern worth copying from [`app/app.js`](../../lang-js/app/app.js) and [`apps/vitals.js`](../../lang-js/app/apps/vitals.js): mixing units on purpose. Percentages for what scales, pixel constants for what holds text, and a computed remainder for whatever fills the rest. A layout expressed purely in percentages looks resolution-independent and is not, because the text inside it does not scale with the boxes.
 
+`lv.size()` reports the *display*, not whatever you are putting children into. The two are the same for a screen with no padding, which is why subtracting from `S.h` works above, but for a padded or nested parent use `parent.bounds()` instead — it returns that parent's actual content area, after padding and borders, and it is the honest number when the container's own size came from a percentage. `apps/vitals.js` sizes its arc that way, because "40% of the tab" and "what fits inside the 40% column" differ by the padding and border between them.
+
 Two things that stay in pixels no matter what:
 
 - **Fonts do not scale.** The three sizes are fixed bitmaps compiled into the firmware, so text is the same height on a 172px panel and a 320px one. Anything sized to fit text is therefore a pixel constant, and a percentage there will clip on a small panel or float in space on a large one.

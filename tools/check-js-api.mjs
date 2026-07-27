@@ -1,10 +1,10 @@
 // check-js-api.mjs — verify the scripts only call bindings that exist.
 //
-// The selftest in lang-js/app/selftest.js is the real check, but it needs the
-// board. This is the part that can run without hardware: it reads the names
-// the C layer actually registers and compares them against what the scripts
-// call, so a typo or a binding removed from C fails the build instead of
-// failing on the device.
+// The selftest in app/selftest.js is the real check, but it needs the board.
+// This is the part that can run without hardware: it reads the names the C
+// layer actually registers and compares them against what the scripts call,
+// so a typo or a binding removed from C fails the build instead of failing
+// on the device.
 //
 //   node tools/check-js-api.mjs
 //
@@ -15,19 +15,29 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const SRC = "lang-js/lvgl-js-bindings/src";
-const SCRIPTS = "lang-js/app";
+const SRC = "firmware/lvgl-js-bindings/src";
+const SCRIPTS = "app";
 
-const cSource = readdirSync(SRC)
+const cFiles = readdirSync(SRC)
   .filter(f => f.endsWith(".cpp"))
-  .map(f => readFileSync(join(SRC, f), "utf8"))
-  .join("\n");
+  .map(f => [f, readFileSync(join(SRC, f), "utf8")]);
+
+const cSource = cFiles.map(([, text]) => text).join("\n");
 
 // JS_SetPropertyStr(ctx, <target>, "<name>", ...) — the one call that publishes
 // anything to scripts, so collecting it by target gives the whole surface.
-const registered = {};
-for (const m of cSource.matchAll(/JS_SetPropertyStr\(\s*ctx,\s*(\w+),\s*"([^"]+)"/g)) {
-  (registered[m[1]] ??= new Set()).add(m[2]);
+//
+// Collected per file, because the target is a C local whose name is not unique
+// across the layer: several modules build their object in a variable called `o`.
+// Merging those would let fs.<a sys or wifi key> pass this check.
+const registered = {};      // target -> Set(name), merged across files
+const perFile = {};         // file -> { target -> Set(name) }
+for (const [file, text] of cFiles) {
+  perFile[file] = {};
+  for (const m of text.matchAll(/JS_SetPropertyStr\(\s*ctx,\s*(\w+),\s*"([^"]+)"/g)) {
+    (registered[m[1]] ??= new Set()).add(m[2]);
+    (perFile[file][m[1]] ??= new Set()).add(m[2]);
+  }
 }
 
 // Widget constructors come from a table rather than individual calls.
@@ -40,7 +50,10 @@ if (makersBlock) {
 const surface = {
   lv: new Set([...(registered.lv ?? []), ...makers]),
   sys: registered.sys ?? new Set(),
-  fs: registered.o ?? new Set(),   // the fs module builds its object as `o`
+  // The fs module builds its object in a local called `o`, so it has to be read
+  // from its own file only — `o` is used the same way in bindings_sys.cpp and
+  // bindings_wifi.cpp for the objects sys.info() and wifi.status() return.
+  fs: perFile["bindings_fs.cpp"]?.o ?? new Set(),
   wifi: registered.wifi ?? new Set(),
 };
 const globals = registered.global ?? new Set();

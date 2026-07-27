@@ -6,12 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
-# What CI can and cannot do here: the real test suite is
-# lang-js/app/selftest.js, which runs on the board and talks over serial, so a
-# hosted runner cannot execute it. These jobs cover everything that does not
-# need hardware — both sketches compile, and the scripts only call bindings
-# that exist. Running selftest.js needs a self-hosted runner with a board
-# attached; see docs/lang-js/build-and-deploy.md for how it is driven.
+# What CI can and cannot do here: the real test suite is app/selftest.js, which
+# runs on the board and talks over serial, so a hosted runner cannot execute it.
+# These jobs cover everything that does not need hardware — every board builds,
+# the frozen C dashboard still builds, and the scripts only call bindings that
+# exist. Running selftest.js needs a self-hosted runner with a board attached;
+# see docs/build-and-deploy.md for how it is driven.
 
 env:
   FQBN: "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc,FlashMode=qio,USBMode=hwcdc"
@@ -29,7 +29,7 @@ jobs:
 
       - name: Syntax-check every script
         run: |
-          for f in $(find lang-js/app -name '*.js'); do
+          for f in $(find app -name '*.js'); do
             node --check "$f" || exit 1
             echo "ok  $f"
           done
@@ -86,14 +86,20 @@ jobs:
           arduino-cli lib install "lvgl@9.5.0"
           arduino-cli lib install "GFX Library for Arduino@1.6.7"
 
-      - name: Build the C sketch
-        run: arduino-cli compile -b "$FQBN" lang-c/app
-
-      # Both vendored libraries live beside the sketch rather than in the
-      # libraries directory, so they are passed explicitly.
-      - name: Build the JavaScript runtime
+      # Both vendored libraries live in firmware/ rather than in the libraries
+      # directory, so they are passed explicitly. Looping over the boards means
+      # a new one is covered by CI as soon as it exists.
+      - name: Build every board
         run: |
-          arduino-cli compile \
-            --library lang-js/quickjs-ng \
-            --library lang-js/lvgl-js-bindings \
-            -b "$FQBN" lang-js/js-host
+          for board in firmware/boards/*/; do
+            echo "--- $board"
+            arduino-cli compile \
+              --library firmware/quickjs-ng \
+              --library firmware/lvgl-js-bindings \
+              -b "$FQBN" "$board" || exit 1
+          done
+
+      # Frozen, but still built: it is the reference for the display and touch
+      # bring-up, so it should not be allowed to rot silently.
+      - name: Build the frozen C dashboard
+        run: arduino-cli compile -b "$FQBN" experiments/c-dashboard/app

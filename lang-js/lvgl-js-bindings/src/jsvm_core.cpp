@@ -52,6 +52,16 @@ void jsvm_report_exception() {
   const char *msg = JS_ToCString(jsvm_ctx, exc);
   Serial.printf("[js] ERROR: %s\n", msg ? msg : "(unprintable)");
   JS_FreeCString(jsvm_ctx, msg);
+
+  // A thrown null or undefined is not a script error: QuickJS reports an
+  // internal allocation failure that way, with no Error object and no stack.
+  // Say so and print the pool, because a bare "ERROR: null" reads like a bug in
+  // the script and sends you looking in entirely the wrong place.
+  if (JS_IsNull(exc) || JS_IsUndefined(exc)) {
+    Serial.printf("[js]   (no Error object — usually allocation failure; %u bytes free, largest block %u)\n",
+                  heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                  heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+  }
   if (JS_IsObject(exc)) {
     JSValue stack = JS_GetPropertyStr(jsvm_ctx, exc, "stack");
     if (JS_IsString(stack)) {
@@ -277,12 +287,22 @@ bool jsvm_running() { return jsvm_ctx != nullptr; }
 bool jsvm_start(const char *src, const char *filename) {
   if (g_rt) jsvm_stop();
 
+  // Report the pool the VM draws from, since that is what decides whether
+  // startup can succeed at all. A bare "failed" here is very hard to act on.
+  const uint32_t heap_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
   g_rt = JS_NewRuntime2(&kMallocFns, nullptr);
-  if (!g_rt) { Serial.println("[js] runtime creation failed"); return false; }
+  if (!g_rt) {
+    Serial.printf("[js] runtime creation failed (%u bytes free, largest block %u)\n",
+                  heap_before, heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+    return false;
+  }
   JS_SetMaxStackSize(g_rt, kJsMaxStack);
   jsvm_ctx = JS_NewContext(g_rt);
   if (!jsvm_ctx) {
-    Serial.println("[js] context creation failed");
+    Serial.printf("[js] context creation failed (%u bytes free at start, %u now, largest block %u)\n",
+                  heap_before, heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                  heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
     JS_FreeRuntime(g_rt);
     g_rt = nullptr;
     return false;
@@ -305,6 +325,13 @@ bool jsvm_start(const char *src, const char *filename) {
 #if JSVM_WITH_WIFI
   js_install_wifi(jsvm_ctx);
 #endif
+
+  // What the VM cost to stand up, and what a script has left to work with. The
+  // second number is the one that decides whether a given script can evaluate,
+  // since source text, bytecode and the resulting object graph all coexist.
+  Serial.printf("[js] vm ready: %u bytes to start, %u free for scripts\n",
+                heap_before - heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
   const uint32_t t0 = millis();
   JSValue r = JS_Eval(jsvm_ctx, src, strlen(src), filename, JS_EVAL_TYPE_GLOBAL);

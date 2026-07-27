@@ -7,21 +7,44 @@
 //   System  — chip facts, live fps, backlight slider
 
 const scr = lv.screen().set({ bg: "#0A1520" });
-const tabs = lv.tabview(scr, { bar: 30, bg: "#0A1520" });
+const BAR_H = 30;
+const tabs = lv.tabview(scr, { bar: BAR_H, bg: "#0A1520" });
+
+// Everything below is sized from the panel rather than for one of them. Widths
+// go through percentages where the parent is sized; heights are computed,
+// because what is left inside a tab depends on the tab bar and the padding.
+// Fonts are fixed bitmaps and never scale, so anything holding text keeps a
+// pixel height.
+const S = lv.size();
+const TAB_H = S.h - BAR_H - 8;  // content height inside a tab, past pad: 4
 
 // ---------------------------------------------------------------- tab 1: Vitals
 const vitals = tabs.addTab("Vitals").set({ pad: 4, scroll: false });
 
-const left = lv.obj(vitals, { w: 186, h: 132, align: "left-mid", x: 2, pad: 4, scroll: false });
+// Two columns, 58/40 with the remainder as the gutter between them. They align
+// to opposite edges rather than being positioned, so the split holds at any width.
+const left = lv.obj(vitals, { w: "58%", h: "100%", align: "left-mid", pad: 4, scroll: false });
 const heapLabel = lv.label(left, { align: "top-left", font: 14, text: "heap --" });
 const chart = lv.chart(left, {
-  w: 172, h: 88, align: "bottom-mid",
-  points: 40, range: [0, 340], divs: [4, 6], seriesColor: "#00BCD4",
+  w: "100%", h: "70%", align: "bottom-mid",
+  // One point per ~8px of width, so a wider panel shows more history rather
+  // than the same history stretched.
+  points: Math.max(20, (S.w / 8) | 0),
+  range: [0, 340], divs: [4, 6], seriesColor: "#00BCD4",
 });
 
-const right = lv.obj(vitals, { w: 118, h: 132, align: "right-mid", x: -2, pad: 4, scroll: false });
+const right = lv.obj(vitals, { w: "40%", h: "100%", align: "right-mid", pad: 4, scroll: false });
+// An arc has to stay square, so it is the smaller of what the column and the
+// height allow. The width comes from the column's own content area rather than a
+// fraction of the screen: 40% of the tab is not what the arc can occupy once the
+// pad and the theme's card border have taken theirs, and guessing at that
+// overflowed the column on a taller panel. The column does not scroll, so an
+// oversized arc is clipped rather than reachable.
+// The `|| ` guards a zero: bounds() forces a layout pass, but a container that
+// somehow measured empty would otherwise size the arc to nothing at all.
+const ARC = Math.min(right.bounds().w || ((S.w * 0.3) | 0), (TAB_H * 0.6) | 0);
 const loadArc = lv.arc(right, {
-  w: 84, h: 84, align: "top-mid",
+  w: ARC, h: ARC, align: "top-mid",
   range: [0, 100], rotation: 135, angles: [0, 270], knob: false,
 });
 const loadLabel = lv.label(loadArc, { align: "center", font: 16, text: "0%" });
@@ -32,7 +55,8 @@ const touch = tabs.addTab("Touch").set({ pad: 4, scroll: false });
 
 const coordLabel = lv.label(touch, { align: "top-left", x: 2, y: 0, font: 14, text: "touch the box" });
 const box = lv.obj(touch, {
-  w: 300, h: 104, align: "bottom-mid", y: -2,
+  // The coordinate readout above it is one 14px line; the box takes the rest.
+  w: "100%", h: TAB_H - 22, align: "bottom-mid", y: -2,
   bg: "#11202B", border: 1, borderColor: "#00BCD4", scroll: false, clickable: true,
 });
 const dot = lv.obj(box, { w: 10, h: 10, radius: 5, bg: "#FFC107", border: 0, hidden: true });
@@ -47,9 +71,11 @@ box.on("press", followFinger).on("pressing", followFinger);
 // ---------------------------------------------------------------- tab 3: WiFi
 const wifiTab = tabs.addTab("WiFi").set({ pad: 4, scroll: false });
 
-const scanBtn = lv.button(wifiTab, { w: 84, h: 30, align: "top-left", text: "Scan" });
-const wifiStatus = lv.label(wifiTab, { align: "top-left", x: 92, y: 8, font: 14, text: "idle" });
-const wifiList = lv.list(wifiTab, { w: 306, h: 100, align: "bottom-mid" });
+const SCAN_W = 84;
+const scanBtn = lv.button(wifiTab, { w: SCAN_W, h: 30, align: "top-left", text: "Scan" });
+const wifiStatus = lv.label(wifiTab, { align: "top-left", x: SCAN_W + 8, y: 8, font: 14, text: "idle" });
+// Stops short of the firmware's 34px corner button, so no row is half under it.
+const wifiList = lv.list(wifiTab, { w: S.w - 48, h: TAB_H - 36, align: "bottom-left" });
 
 function doScan() {
   const started = wifi.scan(nets => {
@@ -75,7 +101,7 @@ lv.label(sysTab, {
 });
 const fpsLabel = lv.label(sysTab, { align: "top-right", x: -2, y: 34, font: 16, color: "#00BCD4", text: "-- fps" });
 lv.label(sysTab, { align: "bottom-left", x: 2, y: -34, font: 14, text: "backlight" });
-const slider = lv.slider(sysTab, { w: 280, h: 14, align: "bottom-mid", y: -8, range: [5, 100], value: 80 });
+const slider = lv.slider(sysTab, { w: "90%", h: 14, align: "bottom-mid", y: -8, range: [5, 100], value: 80 });
 slider.on("change", () => sys.backlight(slider.value()));
 
 // ---------------------------------------------------------------- live readouts

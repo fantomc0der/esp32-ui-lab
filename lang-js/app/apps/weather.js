@@ -43,12 +43,25 @@ const CONDITIONS = {
 
 const scr = lv.screen().set({ bg: "#0E1A24", pad: 0, scroll: false });
 
-lv.label(scr, { align: "top-left", x: 12, y: 10, font: 16, color: "#7FA8C4", text: place.name });
-const state = lv.label(scr, { align: "top-right", x: -46, y: 12, font: 14, color: "#5A7285", text: "" });
+// This screen is deliberately not sized from the panel: it is text at fixed
+// sizes, and the number is meant to be readable across a room, so it neither
+// shrinks to a fraction of a small screen nor grows past the largest font that
+// exists. Adapting is done with alignment instead — every element hangs off an
+// edge or the middle, so the slack on a bigger panel goes into the margins.
+// Nothing here is tappable except the screen itself, so the firmware's corner
+// button covers no control and needs no clearance.
 
-const temp = lv.label(scr, { align: "left-mid", x: 12, y: 2, font: 40, color: "#FFFFFF", text: "--°" });
-const condition = lv.label(scr, { align: "bottom-left", x: 14, y: -34, font: 20, color: "#C8D8E4", text: "" });
-const wind = lv.label(scr, { align: "bottom-left", x: 14, y: -10, font: 14, color: "#5A7285", text: "" });
+lv.label(scr, { align: "top-left", x: 12, y: 10, font: 16, color: "#7FA8C4", text: place.name });
+const state = lv.label(scr, { align: "top-right", x: -12, y: 12, font: 14, color: "#5A7285", text: "" });
+
+// The three readings are one block. All three hang off "left-mid" with fixed
+// spacing, offset up by half the block's height, so the group stays centred and
+// the slack on a taller panel splits evenly above and below it. Splitting the
+// anchors — the number at mid-height, the smaller lines on the bottom edge —
+// would instead open a gap through the middle as the panel grows.
+const temp = lv.label(scr, { align: "left-mid", x: 12, y: -28, font: 40, color: "#FFFFFF", text: "--°" });
+const condition = lv.label(scr, { align: "left-mid", x: 14, y: 16, font: 20, color: "#C8D8E4", text: "" });
+const wind = lv.label(scr, { align: "left-mid", x: 14, y: 42, font: 14, color: "#5A7285", text: "" });
 
 // ---------------------------------------------------------------- rendering
 

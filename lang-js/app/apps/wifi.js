@@ -8,6 +8,15 @@
 
 const scr = lv.screen().set({ bg: "#0B1622", pad: 0, scroll: false });
 
+// Panel size, read once. The three screens below place text at fixed pixel
+// offsets (fonts are fixed bitmaps, so a 16px line is 16px on any panel) but
+// size their lists, keyboard and buttons from what is actually there.
+const S = lv.size();
+// The firmware draws a 34px button in the bottom-right of every screen. Anything
+// tappable that reaches into that corner is partly unreachable, so the keyboard,
+// the buttons and the scan list all stop short of it.
+const CORNER = 40;
+
 // Rebuilding the screen from inside a click handler would delete the very
 // widget LVGL is dispatching to. A 20 ms timer moves the work just past the
 // end of the event, which is the pattern for any redraw triggered by a tap.
@@ -38,11 +47,13 @@ function showStatus() {
 
   // Buttons are decided once, from the state at build time; only the text
   // above them refreshes, so nothing moves under your finger.
+  // Two buttons share the width left of the corner button, whatever that is.
   const initial = wifi.status();
-  lv.button(scr, { w: 130, h: 36, align: "bottom-left", x: 10, y: -10, text: "Scan" })
+  const BTN_W = Math.min(150, ((S.w - CORNER - 30) / 2) | 0);
+  lv.button(scr, { w: BTN_W, h: 36, align: "bottom-left", x: 10, y: -10, text: "Scan" })
     .on("click", () => next(showScan));
   if (initial.saved) {
-    lv.button(scr, { w: 120, h: 36, align: "bottom-left", x: 150, y: -10, text: "Forget" })
+    lv.button(scr, { w: BTN_W, h: 36, align: "bottom-left", x: 20 + BTN_W, y: -10, text: "Forget" })
       .on("click", () => next(() => { wifi.forget(); showStatus(); }));
   }
 
@@ -79,8 +90,15 @@ function showStatus() {
 function showScan() {
   reset();
   header("Choose a network");
-  const note = lv.label(scr, { align: "top-right", x: -46, y: 14, font: 14, color: "#64798C", text: "scanning..." });
-  const list = lv.list(scr, { w: 300, h: 118, align: "bottom-mid", y: -5, bg: "#101E2C", border: 0, radius: 8 });
+  const note = lv.label(scr, { align: "top-right", x: -12, y: 14, font: 14, color: "#64798C", text: "scanning..." });
+  // Everything below the header, which is one 20px line plus its margin. Anchored
+  // bottom-left and stopping short of the corner button, so the last row is not
+  // partly underneath it — a row you can see but only half tap is worse than a
+  // slightly narrower list.
+  const list = lv.list(scr, {
+    w: S.w - CORNER - 10, h: S.h - 44, align: "bottom-left", x: 10, y: -5,
+    bg: "#101E2C", border: 0, radius: 8,
+  });
 
   wifi.scan(nets => {
     if (!nets) { note.set({ text: "scan failed" }); return; }
@@ -103,17 +121,19 @@ function showPassword(ssid) {
   reset();
   lv.label(scr, { align: "top-left", x: 10, y: 4, font: 16, color: "#F0F4F8", text: ssid });
 
+  // The field takes the row, less the reveal button beside it.
+  const REVEAL_W = 60;
   const field = lv.textarea(scr, {
-    w: 240, h: 34, align: "top-left", x: 10, y: 26,
+    w: S.w - REVEAL_W - 20, h: 34, align: "top-left", x: 10, y: 26,
     placeholder: "password", password: true, oneLine: true, maxLength: 63,
   });
 
-  // Typing a long password blind on a 320x172 panel is how you end up entering
+  // Typing a long password blind on a small panel is how you end up entering
   // it three times. LVGL reveals each character for 1.5 s as it is typed, which
   // helps while typing but not when checking what you already have, so this
   // unmasks the whole field.
   let masked = true;
-  const reveal = lv.button(scr, { w: 60, h: 34, align: "top-right", x: -10, y: 26, text: "Show" });
+  const reveal = lv.button(scr, { w: REVEAL_W, h: 34, align: "top-right", x: -10, y: 26, text: "Show" });
   reveal.on("click", () => {
     masked = !masked;
     field.set({ password: masked });
@@ -121,8 +141,9 @@ function showPassword(ssid) {
   });
 
   // The keyboard stops short of the right edge so it does not sit underneath
-  // the firmware's corner button.
-  const kb = lv.keyboard(scr, { w: 280, h: 104, align: "bottom-left", x: 0, y: 0 });
+  // the firmware's corner button, and takes everything below the field: a taller
+  // panel gets taller keys rather than a gap under them.
+  const kb = lv.keyboard(scr, { w: S.w - CORNER, h: S.h - 68, align: "bottom-left", x: 0, y: 0 });
   kb.target(field);
   kb.on("ready", () => next(() => join(ssid, field.value())));
   kb.on("cancel", () => next(showScan));

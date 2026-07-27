@@ -15,11 +15,22 @@ const scr = lv.screen().set({ bg: "#0B1622" });
 const ROW_BG = "#101E2C";
 const PIN_BG = "#1D3A57";
 
+// Panel size, read once — a display does not resize. Fonts are fixed-size
+// bitmaps and do not scale, so the header's height is a pixel constant rather
+// than a fraction and the list takes whatever is left below it. That is what
+// fills a taller panel with more rows instead of more empty space.
+const S = lv.size();
+const HEADER_H = 34;
+// The firmware draws a 34px button in this corner on a pinned board or when a
+// network needs setting up. App rows are the whole point of this screen, so the
+// list stops short of it rather than putting a row half underneath it.
+const CORNER = 40;
+
 lv.label(scr, { align: "top-left", x: 10, y: 8, font: 20, color: "#F0F4F8", text: "Apps" });
 const status = lv.label(scr, { align: "top-right", x: -10, y: 13, font: 14, color: "#64798C", text: "" });
 
 const list = lv.list(scr, {
-  w: 300, h: 126, align: "bottom-mid", y: -5,
+  w: S.w - CORNER - 10, h: S.h - HEADER_H - 10, align: "bottom-left", x: 10, y: -5,
   bg: ROW_BG, border: 0, radius: 8,
 });
 

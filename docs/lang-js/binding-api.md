@@ -124,16 +124,18 @@ That corner holds at most one control, and the firmware picks it:
 
 - **home** — back to the launcher, on a board with no pin
 - **back** — back to the pinned app, when a pin is set and you are somewhere else
-- **Wi-Fi** — to `/apps/wifi.js`, when your app has asked about the network and none is set up
+- **Wi-Fi** — to `/apps/wifi.js`, when your app has asked about the network and cannot get one
 - nothing at all, when you are already where the button would take you
 
-You never opt into the Wi-Fi one: calling `fetch()` or `wifi.status()` is what tells the firmware your app cares about the network, and the button appears only if nothing is saved and nothing is connected. An app that never mentions the network never shows it, and a saved network that is merely down does not either — that case is yours to report, and "offline" is the honest thing to say.
+You never opt into the Wi-Fi one: calling `fetch()` or `wifi.status()` is what tells the firmware your app cares about the network, and an app that never mentions the network never shows it. It appears when nothing is set up, when the saved password is being rejected, and when the saved network has been missing for about a minute — the three cases where someone has to go and fix something.
+
+It stays hidden for failures that retrying can still resolve: a dropped link, a router mid-reboot, the first few attempts at anything. Those are yours to report, and "offline" is the honest thing to say — you can tell them apart with `wifi.status().error` and `.attempts`.
 
 ## Pinning one app
 
 Pinning turns the board into an appliance: with a pin set, boot goes straight to that script and **the firmware draws nothing in the corner while that app is running**, so nothing on screen refers to a launcher that is no longer part of the product. That corner is yours again, and a pinned app should provide whatever navigation it needs itself.
 
-The two exceptions are the ones a pinned board would otherwise have no answer for. If your pinned app wants a network that was never configured, the Wi-Fi button appears; tapping it opens the setup app, and from there the corner shows a back arrow to your app. Both are gone again as soon as the pinned app is what's running.
+The two exceptions are the ones a pinned board would otherwise have no answer for. If your pinned app wants a network it cannot get — none configured, a rejected password, a network that has gone away — the Wi-Fi button appears; tapping it opens the setup app, and from there the corner shows a back arrow to your app. Both are gone again as soon as the pinned app is what's running and has a network.
 
 The escape hatch that remains is the hardware one: a long-press of BOOT (≥ 700 ms) always opens the launcher, whatever is pinned. That is how you reach a board you have pinned, and the launcher is where you release the pin — long-press an app row to pin it, long-press the highlighted row to unpin. Over serial, `pin [path]` and `unpin` do the same thing.
 

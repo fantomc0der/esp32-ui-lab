@@ -187,13 +187,27 @@ Two properties are worth preserving if this changes. A pinned script that fails 
 
 ## Knowing an app wants the network
 
-`jsvm_network_setup_needed()` is true when the running script has called `fetch()` or `wifi.status()` **and** nothing is saved **and** nothing is connected. It is what the corner button's Wi-Fi state is gated on, and it exists so that a board pinned to a network app is not a dead end when no network was ever configured.
+`jsvm_network_setup_needed()` is true when the running script has called `fetch()` or `wifi.status()`, is not connected, and a person at the setup screen could do something about that. It is what the corner button's Wi-Fi state is gated on, and it exists so that a board pinned to a network app is not a dead end.
 
 Interest is inferred from use rather than declared through an API such as `sys.needsWifi()`. A declaration is one more thing every app author has to remember, and forgetting it fails in exactly the confusing way the button is there to prevent; using the network, on the other hand, is not something an app that needs it can omit, nor something an app that doesn't need it does by accident. The cost is timing — the flag is set on the first call, not at load — which is invisible in practice because a network app asks about the radio in its opening lines.
 
 `wifi.status()` counts alongside `fetch()` because the polite form of a network app checks before it fetches (`weather.js` does), so keying on a thrown `fetch()` alone would miss the apps that behave best. The flag is per-script: `js_teardown_wifi()` clears it, so interest never outlives the app that showed it.
 
-The other two conditions are about the device, and both directions matter. Credentials that are saved but failing suppress the button however badly the link is behaving, because reconnection is already supervised and a setup screen has nothing to fix — the app should say "offline" instead. An active connection suppresses it too, which covers a board that joined by some route other than `wifi.save()`.
+The device-side half is not simply "is anything saved". Saved credentials that the access point rejects, or a saved network that has not been seen since the board moved, leave an app exactly as stuck as no credentials at all, and no amount of retrying gets there — `failure_needs_a_person()` sorts the reason codes the disconnect handler already records into the ones a person can fix and the ones only time can:
+
+| Reason | Corner shows Wi-Fi | Why |
+| --- | --- | --- |
+| nothing saved | immediately | there is nothing to wait for |
+| wrong password (auth fail, auth expire, 4-way timeout) | immediately | retyping is the only cure, and retrying is not it |
+| network not found | after 6 attempts (≈ 64 s of backoff) | by then it is a board that moved or a router that was replaced, not one rebooting |
+| lost the access point, association failed, early attempts | never | the supervisor's job; the app should say "offline" |
+| connected | never | — |
+
+The threshold matters in both directions. Too eager and a router reboot pushes a setup screen at someone who only had to wait; too patient and a board carried to a new house sits saying "offline" with no visible way to retarget it. The sixth attempt lands about 64 seconds in (`2+2+4+8+16+32`), which is longer than a reboot and shorter than anyone's patience. It is counted in attempts rather than seconds so that it tracks the retry schedule automatically if the backoff is ever retuned.
+
+An active connection suppresses everything, which also covers a board that joined by some route other than `wifi.save()`.
+
+What none of this covers is a deliberate switch between two working networks: the board has no signal for "I would like a different SSID", and the BOOT long-press is the right amount of friction for reconfiguring an appliance on purpose.
 
 ## Asynchronous work
 

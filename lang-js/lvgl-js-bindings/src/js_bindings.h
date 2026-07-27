@@ -74,15 +74,22 @@ void jsvm_set_filesystem(fs::FS *sd, fs::FS *flash);
 // Reconnection after that is automatic and event-driven.
 bool jsvm_wifi_autoconnect();
 
-// True when the running script has used the network bindings and there is no
-// network for it to use: nothing saved, and nothing connected. It answers the
-// question "would this app be better off if the user set up Wi-Fi right now?",
-// which a host can turn into an offer to do so.
+// True when the running script has used the network bindings, is not getting
+// a network, and a person at a setup screen could change that. It answers the
+// question "would this app be better off if the user opened Wi-Fi setup right
+// now?", which a host can turn into an offer to do so.
 //
 // Interest resets with every script, so an app that never touches the network
-// never reports true. The other two conditions are the device's rather than
-// the app's: saved-but-not-connected is a link to wait out rather than
-// something to set up, so it reports false. Cheap enough to poll from loop().
+// never reports true. Beyond that it reports true in three situations: nothing
+// saved at all; a saved password the access point rejects; and a saved network
+// that has not been seen for about a minute, which is the board having moved
+// or the router having been replaced rather than one rebooting.
+//
+// It stays false while connected, and false for failures that retrying can
+// still fix — a dropped beacon, a refused association, the first few attempts
+// at anything. Those are the supervisor's to solve, and an app should report
+// them as "offline" rather than sending anyone somewhere with nothing to fix.
+// Cheap enough to poll from loop().
 bool jsvm_network_setup_needed();
 #endif
 

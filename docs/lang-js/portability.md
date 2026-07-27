@@ -10,7 +10,7 @@ The counterpart to [`lang-c/portability.md`](../lang-c/portability.md), answerin
 | `quickjs-ng/src/` | vendored | **0%** — plain C, five Xtensa type patches (see [engine-notes.md](engine-notes.md)). |
 | `js-host/js-host.ino` | 332 | **~35%** — display construction, pin use, SD_MMC wiring, and the three host hooks. The loader, reload, and serial protocol are policy you'd likely keep. |
 | `js-host/` hardware headers | — | **100%** — verbatim copies from `lang-c/`; see its [portability doc](../lang-c/portability.md). |
-| `app/app.js` | 100 | **~60%** — pixel geometry chosen for 320×172. The API calls themselves port unchanged. |
+| `app/app.js` and `app/apps/` | ~600 | **~95%** — geometry is derived from `lv.size()`, percentages and alignment rather than written for 320×172. What remains board-specific is the pixel heights of things holding text, since fonts do not scale. |
 
 ## Hard requirements
 
@@ -26,7 +26,9 @@ This is what excludes the **ESP32-C3 and C6** (no PSRAM at all). It includes the
 
 **Screen size and panel type.** No resolution, pin, or controller name appears anywhere in the binding layer. Your sketch registers whatever display LVGL can drive — SPI, parallel, I2C OLED, e-paper, any resolution — and the bindings build widgets into it.
 
-A caveat on "responsive", since LVGL is often assumed to reflow automatically: it does not. Any resolution *works*, but adapting to one is the script's job. A script that hardcodes pixel coordinates (as `app.js` does, for 320×172) keeps those exact coordinates on a bigger panel. The bindings expose percentage sizes (`w: "50%"`) and flex layout (`flex: "row"`) precisely so a script can be written to adapt; see the note in [binding-api.md](binding-api.md). Fonts never scale, since they are fixed-size bitmaps compiled into the firmware.
+A caveat on "responsive", since LVGL is often assumed to reflow automatically: it does not. Any resolution *works*, but adapting to one is the script's job. A script that hardcodes pixel coordinates keeps those exact coordinates on a bigger panel, sitting in the top-left corner of it. The bindings give a script three ways to avoid that — percentage sizes (`w: "50%"`), flex layout (`flex: "row"`), and `lv.size()` for the arithmetic those cannot express — and the shipped apps use all three, so they fill a taller or wider panel rather than being tuned to this one. See [Writing for more than one screen](binding-api.md#writing-for-more-than-one-screen).
+
+The one thing that genuinely does not scale is text: fonts are fixed-size bitmaps compiled into the firmware, so a label is the same pixel height on every panel. That makes any dimension chosen to fit text a pixel constant rather than a percentage, which is why the apps mix the two.
 
 **Touch.** The bindings never reference an input device except to read the active pointer's coordinates when one drove an event. A display-only board works; `.on("click", …)` simply never fires.
 
@@ -37,7 +39,7 @@ A caveat on "responsive", since LVGL is often assumed to reflow automatically: i
 | Target | Work required |
 |---|---|
 | Same board, new UI | Edit `app.js`. No firmware change at all. |
-| Another ESP32-S3 board with a display | New sketch: LVGL display/indev setup for that panel, plus the three host hooks. Both libraries unchanged. Expect an afternoon. |
+| Another ESP32-S3 board with a display | New sketch: LVGL display/indev setup for that panel, plus the three host hooks. Both libraries unchanged, and the shipped apps adapt to the new resolution without editing. Expect an afternoon. |
 | ESP32-S2 or WROVER | As above, plus check flash size and partition scheme. `wifi.scan()` and `sys.info()` still work. |
 | ESP32-C3 / C6 (no PSRAM) | Not supported as written. Requires reworking the allocator to internal RAM and accepting a small heap; unproven. |
 | Non-ESP32 (RP2040, STM32…) | The binding layer's *design* ports, but `esp_heap_caps.h`, `WiFi.h`, and `ESP.*` do not. Expect to replace the allocator and drop or reimplement `wifi.scan()` and `sys.info()`. |

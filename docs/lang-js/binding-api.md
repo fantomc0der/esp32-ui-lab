@@ -13,6 +13,7 @@ The full modern language is available (closures, template literals, BigInt, JSON
 | Call | Notes |
 |---|---|
 | `lv.screen()` | the active screen as a widget handle |
+| `lv.size()` | `{w, h}` of the display in pixels — read it once and compute from it, for the cases percentages cannot express |
 | `lv.obj(parent, props?)` | plain container |
 | `lv.button(parent, props?)` | `text` prop creates/updates a centered child label |
 | `lv.label(parent, props?)` | |
@@ -54,7 +55,9 @@ Accepted at creation and via `.set(props)`. Unknown keys are ignored (scripts sh
 
 ### Writing for more than one screen
 
-Pixel coordinates are the quickest way to lay out a UI you only ever run on one panel, and that is what [`app/app.js`](../../lang-js/app/app.js) does. To make a script survive a different resolution, size with percentages and let `flex` place the children:
+Three tools, in the order you should reach for them.
+
+**Percentages and `flex`, for anything whose parent is already sized.** This is most of a layout, and it needs no arithmetic:
 
 ```js
 const bar = lv.obj(lv.screen(), { w: "100%", h: "20%", flex: "row", flexAlign: ["evenly", "center"] });
@@ -62,7 +65,27 @@ lv.label(bar, { text: "left" });
 lv.label(bar, { text: "right" });
 ```
 
-Fonts do not scale: the three sizes are fixed bitmaps compiled into the firmware, so text stays the same pixel height on a larger display.
+**Alignment, for anything that should hang off an edge or the middle.** An element aligned `bottom-mid` stays at the bottom of any panel with no size involved, so the extra space on a larger display goes into the margin instead of into a gap. [`apps/weather.js`](../../lang-js/app/apps/weather.js) is laid out entirely this way and reads no dimensions at all.
+
+**`lv.size()`, for the decisions a percentage cannot express.** It returns `{w, h}` of the display. Read it once at startup, since a panel does not resize:
+
+```js
+const S = lv.size();
+// A header is one line of a fixed-size font, so its height is a constant and the
+// list takes whatever is left — not "74%", which is only right on one panel.
+const list = lv.list(scr, { w: "94%", h: S.h - 44, align: "bottom-mid" });
+// How much history to show, rather than the same history stretched wider.
+const chart = lv.chart(box, { w: "100%", h: "70%", points: Math.max(20, (S.w / 8) | 0) });
+```
+
+The pattern worth copying from [`app/app.js`](../../lang-js/app/app.js) and [`apps/vitals.js`](../../lang-js/app/apps/vitals.js): mixing units on purpose. Percentages for what scales, pixel constants for what holds text, and a computed remainder for whatever fills the rest. A layout expressed purely in percentages looks resolution-independent and is not, because the text inside it does not scale with the boxes.
+
+Two things that stay in pixels no matter what:
+
+- **Fonts do not scale.** The three sizes are fixed bitmaps compiled into the firmware, so text is the same height on a 172px panel and a 320px one. Anything sized to fit text is therefore a pixel constant, and a percentage there will clip on a small panel or float in space on a large one.
+- **The firmware's corner button is 34px in the bottom-right** of every screen (see [Apps and getting back](#apps-and-getting-back)). A control placed under it is unreachable, so leave ~40px clear there — `apps/wifi.js` sizes its keyboard `S.w - CORNER` for exactly this reason.
+
+`selftest.js` deliberately keeps fixed sizes throughout: its geometry is test fixtures with expected values, not a layout.
 
 ### Widget methods
 

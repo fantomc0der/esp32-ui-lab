@@ -557,6 +557,20 @@ static JSValue js_lv_screen(JSContext *ctx, JSValueConst, int, JSValueConst *) {
   return jsvm_wrap_widget(ctx, lv_screen_active());
 }
 
+// lv.size() -> {w, h} of the active display, in pixels.
+//
+// Percentages and flex cover most of what a layout needs, but not all of it: a
+// chart's point count, how many list rows fit, whether a two-column split is
+// worth making at all — those are decisions a script has to make from a number,
+// and this is where it gets one. Read once at startup; a panel does not resize.
+static JSValue js_lv_size(JSContext *ctx, JSValueConst, int, JSValueConst *) {
+  lv_display_t *d = lv_display_get_default();
+  JSValue o = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, o, "w", JS_NewInt32(ctx, d ? lv_display_get_horizontal_resolution(d) : 0));
+  JS_SetPropertyStr(ctx, o, "h", JS_NewInt32(ctx, d ? lv_display_get_vertical_resolution(d) : 0));
+  return o;
+}
+
 static JSValue js_lv_timer(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
   if (argc < 2 || !JS_IsFunction(ctx, argv[1]))
     return JS_ThrowTypeError(ctx, "timer(ms, fn) needs a function");
@@ -586,6 +600,7 @@ void js_install_lv(JSContext *ctx) {
 
   JSValue lv = JS_NewObject(ctx);
   JS_SetPropertyStr(ctx, lv, "screen", JS_NewCFunction(ctx, js_lv_screen, "screen", 0));
+  JS_SetPropertyStr(ctx, lv, "size", JS_NewCFunction(ctx, js_lv_size, "size", 0));
   JS_SetPropertyStr(ctx, lv, "timer", JS_NewCFunction(ctx, js_lv_timer, "timer", 2));
   static const struct { const char *name; WidgetKind kind; } kMakers[] = {
       {"obj", W_OBJ}, {"button", W_BUTTON}, {"label", W_LABEL}, {"slider", W_SLIDER},

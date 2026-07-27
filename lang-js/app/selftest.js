@@ -73,6 +73,19 @@ check("bounds() reports geometry", () => {
   return b.w > 0 && b.h > 0 && typeof b.x === "number" && typeof b.y === "number";
 });
 
+// lv.size() is what lets a script lay out for the panel it is on rather than the
+// one it was written for, so it has to report the real display, not zeros.
+check("size() reports the panel", () => {
+  const s = lv.size();
+  return s.w > 0 && s.h > 0;
+});
+check("size() agrees with the screen's own bounds", () => {
+  const b = scr.bounds(), s = lv.size();
+  // The screen's content area is the panel less its padding, so it cannot exceed
+  // the display and should not be wildly smaller either.
+  return b.w <= s.w && b.h <= s.h && b.w > s.w - 40 && b.h > s.h - 40;
+});
+
 // Resolution independence: a percentage must resolve against the parent's
 // content area, not be mistaken for "content" sizing.
 check("percentage width resolves against the parent", () => {

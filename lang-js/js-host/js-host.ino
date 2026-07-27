@@ -400,6 +400,18 @@ static bool writeScript(const char *path, const String &text) {
   const char *p;
   fs::FS *dest = resolveFs(path, &p);
   if (!dest) return false;
+
+  // open(FILE_WRITE) will not create intervening directories, so uploading
+  // /apps/x.js to a freshly formatted card reported only "write FAILED" — which
+  // reads as a broken card rather than a missing folder. Walk the path and create
+  // each level: mkdir() itself is not recursive either, so creating only the
+  // immediate parent would leave a nested path failing the same silent way.
+  for (const char *slash = strchr(p + 1, '/'); slash; slash = strchr(slash + 1, '/')) {
+    String dir(p);
+    dir.remove(slash - p);
+    if (!dest->exists(dir.c_str())) dest->mkdir(dir.c_str());
+  }
+
   File f = dest->open(p, FILE_WRITE);
   if (!f) return false;
   f.print(text);

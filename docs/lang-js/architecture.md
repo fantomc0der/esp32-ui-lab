@@ -162,17 +162,52 @@ Reload correctness was checked on hardware with five consecutive cycles: interna
 
 ## Switching apps
 
-A script cannot switch apps synchronously. `sys.launch()` would have to call `jsvm_stop()`, which destroys the `JSContext` while the calling function is still executing inside it — the same use-after-free class as the trampoline hazard above. So it only records a name. The host collects it with `jsvm_take_pending_launch()` at the end of `loop()`, after LVGL dispatch, the serial REPL, and the promise queue have all unwound, and performs the switch there. The home button and the BOOT long-press feed the same queue rather than acting directly, for the same reason.
+A script cannot switch apps synchronously. `sys.launch()` would have to call `jsvm_stop()`, which destroys the `JSContext` while the calling function is still executing inside it — the same use-after-free class as the trampoline hazard above. So it only records a name. The host collects it with `jsvm_take_pending_launch()` at the end of `loop()`, after LVGL dispatch, the serial REPL, and the promise queue have all unwound, and performs the switch there. The corner button and the BOOT long-press feed the same queue rather than acting directly, for the same reason.
 
-The way back is deliberately not the app's responsibility. The firmware creates a home button on `lv_layer_top()`, which is not a child of the active screen, so `jsvm_stop()`'s `lv_obj_clean(lv_screen_active())` cannot delete it and no script can reach it to break it. An app that draws over its whole screen, or throws while building, still leaves you a way out — and BOOT works even if touch has stopped responding.
+The way back is deliberately not the app's responsibility. The firmware creates a button on `lv_layer_top()`, which is not a child of the active screen, so `jsvm_stop()`'s `lv_obj_clean(lv_screen_active())` cannot delete it and no script can reach it to break it. An app that draws over its whole screen, or throws while building, still leaves you a way out — and BOOT works even if touch has stopped responding.
+
+## The corner button
+
+The bottom-right corner is one slot holding at most one control, and `updateCornerButton()` decides which, from three inputs: what is running, whether a pin is set, and whether the running app wants a network the board has not got. It runs once per `loop()` and touches LVGL only when the answer changes, so nothing that causes a change has to remember to announce it.
+
+| State | Shown when | Goes to |
+| --- | --- | --- |
+| Wi-Fi | `jsvm_network_setup_needed()`, and the Wi-Fi app is not already what's running | `kWifiApp` |
+| Back | a pin is set and something other than the pinned app is running | the pinned app |
+| Home | no pin, and something other than the launcher is running | `kLauncher` |
+| nothing | you are already where the button would take you | — |
+
+Setup outranks navigation because it is the more actionable of the two and the harder one to reach by other means: a pinned board draws no back button while its app is running, so without the Wi-Fi state that corner is empty and the only route to network setup is a BOOT long-press nobody discovers. Ranking it above Home costs an unpinned user one extra tap through the launcher, which is a fair trade for a rule that reads the same on both kinds of board.
 
 ## Pinning one app
 
-A pin is a single NVS string, written by `sys.pin()` or the host's `pin` command and read back by `jsvm_pinned_app()`. The binding library only remembers the preference; what to do about it is host policy, which keeps the split intact — the library still knows nothing about launchers or home buttons. `js-host` reads it in two places: `setup()` boots the pinned script instead of `kLauncher`, and `updateHomeButton()` treats a pin as "there is nowhere to go back to" and keeps the button hidden.
+A pin is a single NVS string, written by `sys.pin()` or the host's `pin` command and read back by `jsvm_pinned_app()`. The binding library only remembers the preference; what to do about it is host policy, which keeps the split intact — the library still knows nothing about launchers or corner buttons. `js-host` reads it in two places: `setup()` boots the pinned script instead of `kLauncher`, and `updateCornerButton()` treats a pin as "the launcher is not part of this product", which both hides the button while the pinned app is running and redefines the way back as the pinned app rather than the launcher. The value it reads is cached in RAM, so polling it every `loop()` does not hit NVS.
 
-The button is derived state rather than something each caller sets, because a script can pin or unpin itself at any moment; `updateHomeButton()` therefore runs once per `loop()` and touches LVGL only when the answer changes. The value it reads is cached in RAM, so polling it does not hit NVS.
+Two properties are worth preserving if this changes. A pinned script that fails to load still falls back to the launcher, so a bad pin cannot brick the panel. And the BOOT long-press deliberately ignores the pin: it is the only route back to the launcher once the corner button no longer offers one, and therefore the only way to unpin a board with nothing plugged into it.
 
-Two properties are worth preserving if this changes. A pinned script that fails to load still falls back to the launcher, so a bad pin cannot brick the panel. And the BOOT long-press deliberately ignores the pin: it is the only route back to the launcher once the home button is gone, and therefore the only way to unpin a board with nothing plugged into it.
+## Knowing an app wants the network
+
+`jsvm_network_setup_needed()` is true when the running script has called `fetch()` or `wifi.status()`, is not connected, and a person at the setup screen could do something about that. It is what the corner button's Wi-Fi state is gated on, and it exists so that a board pinned to a network app is not a dead end.
+
+Interest is inferred from use rather than declared through an API such as `sys.needsWifi()`. A declaration is one more thing every app author has to remember, and forgetting it fails in exactly the confusing way the button is there to prevent; using the network, on the other hand, is not something an app that needs it can omit, nor something an app that doesn't need it does by accident. The cost is timing — the flag is set on the first call, not at load — which is invisible in practice because a network app asks about the radio in its opening lines.
+
+`wifi.status()` counts alongside `fetch()` because the polite form of a network app checks before it fetches (`weather.js` does), so keying on a thrown `fetch()` alone would miss the apps that behave best. The flag is per-script: `js_teardown_wifi()` clears it, so interest never outlives the app that showed it.
+
+The device-side half is not simply "is anything saved". Saved credentials that the access point rejects, or a saved network that has not been seen since the board moved, leave an app exactly as stuck as no credentials at all, and no amount of retrying gets there — `failure_needs_a_person()` sorts the reason codes the disconnect handler already records into the ones a person can fix and the ones only time can:
+
+| Reason | Corner shows Wi-Fi | Why |
+| --- | --- | --- |
+| nothing saved | immediately | there is nothing to wait for |
+| wrong password (auth fail, auth expire, 4-way timeout) | immediately | retyping is the only cure, and retrying is not it |
+| network not found | after 6 attempts (≈ 64 s of backoff) | by then it is a board that moved or a router that was replaced, not one rebooting |
+| lost the access point, association failed, early attempts | never | the supervisor's job; the app should say "offline" |
+| connected | never | — |
+
+The threshold matters in both directions. Too eager and a router reboot pushes a setup screen at someone who only had to wait; too patient and a board carried to a new house sits saying "offline" with no visible way to retarget it. The sixth attempt lands about 64 seconds in (`2+2+4+8+16+32`), which is longer than a reboot and shorter than anyone's patience. It is counted in attempts rather than seconds so that it tracks the retry schedule automatically if the backoff is ever retuned.
+
+An active connection suppresses everything, which also covers a board that joined by some route other than `wifi.save()`.
+
+What none of this covers is a deliberate switch between two working networks: the board has no signal for "I would like a different SSID", and the BOOT long-press is the right amount of friction for reconfiguring an appliance on purpose.
 
 ## Asynchronous work
 

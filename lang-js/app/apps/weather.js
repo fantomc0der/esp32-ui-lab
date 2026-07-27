@@ -6,7 +6,7 @@
 // something useful the moment it opens, before any request finishes.
 //
 // Location comes from /config/weather.json:
-//   { "name": "Berlin", "lat": 52.52, "lon": 13.41 }
+//   { "name": "Philadelphia, PA", "lat": 39.95, "lon": -75.17 }
 
 const CONFIG = "/config/weather.json";
 const CACHE = "/cache/weather.json";
@@ -18,7 +18,7 @@ const REFRESH_MS = 10 * 60 * 1000;
 const RETRY_MS = 3000;
 
 const place = (() => {
-  const fallback = { name: "Berlin", lat: 52.52, lon: 13.41 };
+  const fallback = { name: "Philadelphia, PA", lat: 39.95, lon: -75.17 };
   try {
     const raw = fs.available() && fs.read(CONFIG);
     return raw ? Object.assign(fallback, JSON.parse(raw)) : fallback;

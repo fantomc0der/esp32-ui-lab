@@ -35,6 +35,12 @@ static bool g_events_hooked = false;
 // Cleared by wifi.forget() so the reconnect handler stops fighting the user.
 static bool g_want_connection = false;
 
+// Set the first time the running script asks anything about the network, and
+// cleared when that script is torn down. It is what lets a host offer Wi-Fi
+// setup to an app that needs it without offering it to a clock — see
+// jsvm_network_setup_needed().
+static bool g_network_touched = false;
+
 // Retrying is supervised from an lv_timer rather than driven straight from the
 // WiFi event, for two reasons. Events arrive on the system event task, so
 // creating or touching anything LVGL owns from there would break the
@@ -58,6 +64,33 @@ static const char *reason_name(uint8_t r) {
     case WIFI_REASON_ASSOC_FAIL:             return "association failed";
     case WIFI_REASON_BEACON_TIMEOUT:         return "lost the access point";
     default:                                 return "disconnected";
+  }
+}
+
+// Where "not there right now" becomes "not there". The supervisor's backoff
+// below puts the 6th attempt about 64 seconds in (2+2+4+8+16+32), which is
+// longer than a router takes to reboot and shorter than anyone will stand in
+// front of a board wondering. Counting attempts rather than milliseconds keeps
+// this tied to the retry schedule: change the backoff and this moves with it.
+static const uint8_t kAttemptsUntilApIsGone = 6;
+
+// The second distinction, for the same reason codes: can a person at the setup
+// screen do anything about this, or is waiting the only cure?
+//
+// A password that was typed wrong does not become right by retrying, so that
+// one counts immediately. A network that has not been seen in a minute is more
+// likely one the board has been carried away from, or a router that has been
+// replaced, than one that is mid-reboot. Everything else — a lost beacon, a
+// refused association, the first few attempts at anything — is what the
+// supervisor exists for, and the app should say "offline" rather than send
+// anyone to a screen with nothing to fix.
+static bool failure_needs_a_person(uint8_t r, uint8_t attempts) {
+  switch (r) {
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_AUTH_EXPIRE:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: return true;
+    case WIFI_REASON_NO_AP_FOUND:            return attempts >= kAttemptsUntilApIsGone;
+    default:                                 return false;
   }
 }
 
@@ -175,6 +208,7 @@ static JSValue js_wifi_connect(JSContext *ctx, JSValueConst, int, JSValueConst *
 
 // Deliberately never reports the password.
 static JSValue js_wifi_status(JSContext *ctx, JSValueConst, int, JSValueConst *) {
+  g_network_touched = true;
   const bool up = WiFi.status() == WL_CONNECTED;
   JSValue o = JS_NewObject(ctx);
   JS_SetPropertyStr(ctx, o, "connected", JS_NewBool(ctx, up));
@@ -373,6 +407,7 @@ static void fetch_poll_timer(lv_timer_t *) {
 
 static JSValue js_fetch(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
   if (argc < 1) return JS_ThrowTypeError(ctx, "fetch(url) needs a url");
+  g_network_touched = true;
   if (g_fetch_busy) return JS_ThrowInternalError(ctx, "a fetch is already in flight");
   if (WiFi.status() != WL_CONNECTED) return JS_ThrowInternalError(ctx, "not connected to wifi");
 
@@ -404,9 +439,37 @@ static JSValue js_fetch(JSContext *ctx, JSValueConst, int argc, JSValueConst *ar
   return promise;
 }
 
+// ---------------------------------------------------------------- setup prompt
+
+// "The script on screen wants a network, and a person could get it one."
+//
+// Interest is inferred rather than declared: a script says it needs the radio
+// by using it, which is a signal no app author can forget to send and no app
+// that ignores the network can accidentally send. The cost is that it arrives
+// on the first call rather than at load.
+//
+// Saved credentials are not by themselves an answer. Nothing saved is the
+// obvious case, but a saved password that is wrong, or a saved network that
+// has not been seen since the board moved, leaves an app just as stuck and
+// with just as much for a person to fix — and unlike the transient failures,
+// no amount of retrying gets there. What a saved network does rule out is the
+// router that is merely rebooting; failure_needs_a_person() draws that line.
+//
+// A live connection rules everything out, which also covers a board joined by
+// some route other than wifi.save().
+bool jsvm_network_setup_needed() {
+  if (!g_network_touched) return false;
+  if (WiFi.status() == WL_CONNECTED) return false;
+  if (!g_want_connection) return true;
+  return failure_needs_a_person(g_last_reason, g_attempts);
+}
+
 // ---------------------------------------------------------------- lifecycle
 
 void js_teardown_wifi() {
+  // Interest belongs to the script that showed it, not to the device.
+  g_network_touched = false;
+
   // Abandon any in-flight fetch. The worker may still be running, so bump the
   // generation instead of killing it: its result becomes a no-op.
   if (g_fetch_busy) {

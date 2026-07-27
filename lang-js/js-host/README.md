@@ -14,7 +14,11 @@ Two docs cover this sketch: [`docs/lang-js/binding-api.md`](../../docs/lang-js/b
 
 The shipped app lives at [`../app/app.js`](../app/app.js); copy it to a FAT-formatted card's root.
 
-Pinning replaces step 1: with a pin set (long-press an app in the launcher, or `pin <path>` over serial), the boot goes straight to that script and the firmware draws no home button, so the board reads as a single-app appliance rather than a menu. A long-press of **BOOT** still opens the launcher — the only way back once the button is gone, and where you unpin.
+Pinning replaces step 1: with a pin set (long-press an app in the launcher, or `pin <path>` over serial), the boot goes straight to that script and the firmware draws nothing over it, so the board reads as a single-app appliance rather than a menu. A long-press of **BOOT** still opens the launcher — the only way back once the button is gone, and where you unpin.
+
+## The corner button
+
+The firmware owns the bottom-right corner and puts at most one control there, chosen in `updateCornerButton()` from what is running, whether a pin is set, and whether the running app wants a network the board has not got: **home** to the launcher, **back** to the pinned app, **Wi-Fi** to `/apps/wifi.js`, or nothing when you are already where the button would take you. The Wi-Fi state is the reason a board pinned to a network app is not a dead end when no network was ever set up; `docs/lang-js/architecture.md` covers how the firmware infers that an app wants one.
 
 ## The edit loop
 

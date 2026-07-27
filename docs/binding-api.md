@@ -2,6 +2,8 @@
 
 The JavaScript surface exposed by the [`lvgl-js-bindings`](../firmware/lvgl-js-bindings/README.md) library. Deliberately curated, not exhaustive: 11 widget makers plus around 30 module functions, covering the 20% of LVGL that delivers 80% of a small-panel UI. Everything runs on one FreeRTOS task (the same one that runs `lv_timer_handler`), so there is no locking anywhere and callbacks never race the renderer.
 
+This page is the whole API, and everything below is what the firmware provides. There is also an optional layer above it: [`ui-runtime.md`](ui-runtime.md) describes a JSX component model with hooks, written in JavaScript on top of these same calls and bundled into apps that ask for it. It changes how a layout is expressed, not what is available — every prop and every method here means the same thing under it.
+
 ## Globals
 
 Six globals exist in every script: `lv`, `sys`, `fs`, `wifi`, `fetch`, and `console`. There is no module system and no `import`; one script file is the whole app, and `fs` is how it reaches storage.
@@ -98,6 +100,8 @@ Two things that stay in pixels no matter what:
 - `.addTab(name)` — tabviews only; returns the tab's content container
 - `.push(n)` — charts only; appends to the series, shifting left when full
 - `.clean()` — deletes all children (their callbacks are released via the DELETE hooks)
+- `.delete()` — deletes this one widget and its subtree, leaving its siblings alone. Same hazard as `.clean()`: deleting the widget LVGL is currently dispatching an event to is not safe, so defer it a tick. Throws on the screen itself
+- `.index()` / `.index(n)` — read or set this widget's position among its parent's children. Moving an existing widget is how a reordered list keeps the widgets it already had
 - `.bounds()` — `{ x, y, w, h }` of the content area in screen coordinates; combine with the `x, y` from a pointer event to place children under a finger
 
 ## fs — files

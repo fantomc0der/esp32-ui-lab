@@ -121,7 +121,56 @@ check("flexAlign accepts a pair", () => {
   return true;
 });
 
+// ---------------------------------------------------------------- delete and index
+//
+// The two the component runtime is built on: removing one child of a container
+// while its siblings stay, and reordering without rebuilding.
+check("delete() removes one child, leaving its siblings", () => {
+  const box = lv.obj(scr, { w: 60, h: 40, hidden: true });
+  const a = lv.label(box, { text: "a" });
+  const b = lv.label(box, { text: "b" });
+  const c = lv.label(box, { text: "c" });
+  b.delete();
+  const ok = threw(() => b.set({ text: "gone" })) &&
+             a.index() === 0 && c.index() === 1;
+  box.clean();
+  return ok;
+});
+
+check("index() reports position among siblings", () => {
+  const box = lv.obj(scr, { w: 60, h: 40, hidden: true });
+  const a = lv.label(box, { text: "a" });
+  const b = lv.label(box, { text: "b" });
+  const ok = a.index() === 0 && b.index() === 1;
+  box.clean();
+  return ok;
+});
+
+check("index(n) moves a widget and is chainable", () => {
+  const box = lv.obj(scr, { w: 60, h: 40, hidden: true });
+  const a = lv.label(box, { text: "a" });
+  const b = lv.label(box, { text: "b" });
+  const c = lv.label(box, { text: "c" });
+  const ok = c.index(0) === c && c.index() === 0 && a.index() === 1 && b.index() === 2;
+  box.clean();
+  return ok;
+});
+
+// A deleted widget's event binding must be released by the LV_EVENT_DELETE
+// hook, the same path .clean() uses. Nothing here can observe the free
+// directly; what it can observe is that deleting a widget with a handler
+// attached does not fault.
+check("delete() releases an event binding", () => {
+  const box = lv.obj(scr, { w: 40, h: 20, hidden: true });
+  const btn = lv.button(box, { w: 30, h: 16, text: "x" });
+  btn.on("click", () => console.log("never"));
+  btn.delete();
+  box.clean();
+  return true;
+});
+
 // ---------------------------------------------------------------- misuse is rejected
+check("delete() refuses the screen", () => threw(() => scr.delete()));
 check("push() rejects a non-chart", () => threw(() => panel.push(1)));
 check("addTab() rejects a non-tabview", () => threw(() => panel.addTab("x")));
 check("add() rejects a non-list", () => threw(() => panel.add("x")));

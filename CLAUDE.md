@@ -30,6 +30,7 @@ Build/flash (`flash.ps1` encodes the FQBN and finds the port):
 .\flash.ps1                         # the firmware: -BuildOnly, -Port COMx, -Monitor, -Board <name>
 cd experiments/c-dashboard; .\flash.ps1   # the frozen C dashboard; same flags
 .\push.ps1 app\apps\weather.js      # send one script over serial (never paste by hand)
+node tools/build-app.mjs            # app/src/*.jsx -> app/apps/*.js, before pushing a JSX app
 ```
 
 Manual `arduino-cli compile` must link the two vendored libraries explicitly, since they sit in `firmware/` rather than in the Arduino libraries folder:
@@ -43,9 +44,14 @@ What CI (`.github/workflows/ci.yml`) actually checks, without hardware:
 ```powershell
 node --check app/**/*.js                 # syntax-check every script
 node tools/check-js-api.mjs              # fail if a script calls a binding the C layer doesn't register
+node tools/test-jsx.mjs                  # the JSX transform
+node tools/test-ui.mjs                   # the component runtime, against a fake lv
+node tools/build-app.mjs --check         # fail if a committed app/apps/*.js is stale
 ```
 
-What CI *cannot* do: run `app/selftest.js`, the real functional test — it executes on the board and reports over serial, so it needs hardware (deploy it in place of `app.js` and read the serial log, or wire up a self-hosted runner). There is no hosted way to test the UI end-to-end; changes to the binding layer or hardware glue need a real board.
+What CI *cannot* do: run `app/selftest.js`, the real functional test of the binding layer — it executes on the board and reports over serial, so it needs hardware (deploy it in place of `app.js` and read the serial log, or wire up a self-hosted runner). `app/ui-selftest.js` is the same shape for the component runtime. Changes to the binding layer or hardware glue need a real board; the JSX layer is mostly coverable without one, because it is pure JavaScript over `lv` calls that `tools/lv-mock.mjs` can fake.
+
+One trap the PC-side checks cannot catch on their own: **Node accepts control characters (a raw NUL) inside a string literal and QuickJS does not**, so such a file passes `node --check`, pushes with a matching checksum, and then fails to evaluate on the panel with a syntax error on a line that looks fine. `tools/build-app.mjs` rejects them; nothing else does.
 
 ## Architecture
 
@@ -59,6 +65,8 @@ What CI *cannot* do: run `app/selftest.js`, the real functional test — it exec
 - `boards/<name>/` — one sketch per board, hardware only: pinout (`board_pins.h`), panel init (`jd9853_panel.h`), touch, `lv_conf.h`, the display stack, the three host hooks (`jsvm_host_fps()`, `jsvm_host_backlight()`, `jsvm_host_battery()`), and a `JsvmAppConfig` handed to `jsvm_app_begin()`. 189 lines here; resist adding policy back. **This is the hardware source of truth — fix bugs here.** Its glue files started as copies of `experiments/c-dashboard/app`; that direction is now historical and nothing is copied back. `lv_conf.h` diverges from the dashboard's copy in exactly 2 lines on purpose (Montserrat 28 and 40 enabled, because scripts can select them) — do not "resolve" that by re-copying.
 
 **`app/`** — `app.js` is the launcher shipped to the board; `apps/*.js` are individual apps (`sys.launch(path)` switches between them); `selftest.js` is the on-hardware binding-layer test, deployed in place of `app.js`.
+
+`lib/ui.js` and `src/*.jsx` are the optional component layer: JSX with React-style hooks and a reconciler, written in JavaScript over the same `lv` bindings, bundled into an app by `tools/build-app.mjs`. **The firmware knows nothing about it** — that is the whole design, and the reason `docs/design-rationale.md` can still say the firmware has no JSX, no React and no virtual DOM while apps can be written with all three. Two firmware methods exist for it (`.delete()`, `.index()`) and are useful imperatively too. Outputs under `app/apps/` and `app/ui-selftest.js` are **generated and committed** (the card layout is what ships), so edit `app/src/*.jsx` and rebuild; CI fails on a stale output. A source can redirect its output with a `// @out <path>` line, which is how `ui-selftest` stays out of the launcher's app list. Full model and limits: `docs/ui-runtime.md`.
 
 Script boot order: the pinned app if one is set (`sys.pin()` / the `pin` serial command, stored in NVS) → `/app.js` on the SD card → `/app.js` on the flash FATFS partition → a built-in fallback screen. A pin also suppresses the firmware's corner button while the pinned app runs, so BOOT long-press is the only way back to the launcher on a pinned board. Edit loop: edit on PC → reinsert card → long-press BOOT (≥700 ms) to reload, no recompile.
 

@@ -39,6 +39,20 @@ jobs:
       - name: Check scripts against the binding surface
         run: node tools/check-js-api.mjs
 
+      # The JSX transform and the component runtime are plain JavaScript, so
+      # unlike the binding layer they can be tested properly without a board.
+      - name: Test the JSX transform
+        run: node tools/test-jsx.mjs
+
+      - name: Test the component runtime
+        run: node tools/test-ui.mjs
+
+      # app/apps/*.js is generated from app/src/*.jsx and committed, because it
+      # is what the card holds. A source edit without a rebuild would otherwise
+      # ship the old app.
+      - name: Check the built apps match their sources
+        run: node tools/build-app.mjs --check
+
       - name: Check relative links in docs
         run: |
           fail=0

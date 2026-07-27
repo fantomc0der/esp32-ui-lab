@@ -15,6 +15,7 @@ Organized by topic, roughly following the repo layout (see the [top-level README
 | Doc | What's in it |
 |---|---|
 | [binding-api.md](binding-api.md) | The JavaScript API exposed to apps (lv/sys/fs/wifi/fetch/console), props reference, responsive layout guidance, and the GC ownership rules |
+| [ui-runtime.md](ui-runtime.md) | The optional JSX component layer: elements, hooks, what the reconciler does and where it stops, the build step, and testing it without a board |
 | [runtime-architecture.md](runtime-architecture.md) | How the runtime works internally: the layer stack, threading rule, call and event flow, JSValue ownership, teardown order, memory map, and how to extend it |
 | [portability.md](portability.md) | What the runtime actually requires (PSRAM, flash, LVGL 9), which ESP32 variants qualify, why screen size is not a constraint, and the three-hook porting contract |
 | [build-and-deploy.md](build-and-deploy.md) | Building the firmware (the --library flag), deploying app.js via SD card or serial, the REPL/upload serial commands, expected boot log |

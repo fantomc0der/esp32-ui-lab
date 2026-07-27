@@ -40,6 +40,13 @@ Two ways to ship a script:
 .\push.ps1 app\selftest.js -Dest /app.js
 ```
 
+An app written in JSX has to be built first, since the board parses plain JavaScript. The output is committed, so this only matters when you have edited the source:
+
+```powershell
+node tools/build-app.mjs tasks         # app\src\tasks.jsx -> app\apps\tasks.js
+.\push.ps1 app\apps\tasks.js
+```
+
 The destination mirrors the repo layout under `app\`, because that layout *is* the card layout.
 
 It exists because both ways this route goes wrong leave a file that still parses, so the board reloads without complaint and the damage only shows on the panel: the encoding trap under [Serial commands & the REPL](#serial-commands--the-repl) below, and pacing — the host reads serial one character at a time from `loop()`, so a file pushed as fast as the port accepts it loses bursts out of the middle. `push.ps1` forces UTF-8, paces the lines, and then reads the file back off the board and compares a position-sensitive checksum against the local copy, so a mangled push fails loudly. Raise `-LineDelayMs` if a mismatch ever repeats.
@@ -51,12 +58,27 @@ Note that the stored copy always ends with exactly one more newline than the fil
 [`app/selftest.js`](../app/selftest.js) is a script you deploy exactly like `app.js`. It exercises the binding surface and prints a `PASS`/`FAIL` line per check, ending with a count:
 
 ```
-SELFTEST 61 passed, 0 failed
+SELFTEST 66 passed, 0 failed
 ```
 
-Anything other than `0 failed` means the bindings regressed. It covers widget construction, props, values, chaining, misuse rejection, `sys.*`, `fs.*`, timers, and promise resolution, plus regression checks for two use-after-free bugs that were found on hardware (a timer callback stopping its own timer, and a widget handle used after its container was cleaned). Touch-driven behaviour is not covered, since a tap cannot be synthesized, and neither is anything needing a network. Run it after any change to the binding library, then re-deploy `app.js`.
+Anything other than `0 failed` means the bindings regressed. It covers widget construction, props, values, chaining, misuse rejection, `sys.*`, `fs.*`, timers, promise resolution, and the `.delete()`/`.index()` pair the component runtime is built on, plus regression checks for two use-after-free bugs that were found on hardware (a timer callback stopping its own timer, and a widget handle used after its container was cleaned). Touch-driven behaviour is not covered, since a tap cannot be synthesized, and neither is anything needing a network. Run it after any change to the binding library, then re-deploy `app.js`.
 
 It is also the only functional test of the binding layer, and it cannot run in CI: it executes on the board and reports over serial. CI syntax-checks every script and verifies they only call bindings the C layer registers ([`tools/check-js-api.mjs`](../tools/check-js-api.mjs)), which catches a typo or a removed binding but not a behavioural regression. Now that the supervisor lives in the library rather than in each sketch, a bug there reaches every board, which makes running this by hand after binding-layer changes the actual gate.
+
+## Checking the component runtime
+
+[`app/ui-selftest.js`](../app/ui-selftest.js) does the same job for the JSX layer, and is deployed the same way:
+
+```powershell
+node tools/build-app.mjs ui-selftest
+.\push.ps1 app\ui-selftest.js -Dest /app.js
+```
+
+```
+UISELFTEST 17 passed, 0 failed
+```
+
+Unlike the binding selftest, most of this ground *is* covered without hardware — [`tools/test-ui.mjs`](../tools/test-ui.mjs) runs the reconciler against a fake `lv` in CI, and covers more cases than this does, since a mock can count widget creations and inspect the props of each `.set()`. What only the board can show is that the bookkeeping matches LVGL: that `lv_obj_move_to_index` really reorders, that a deleted widget really invalidates its handle, and that a render deferred into a promise microtask really lands within a frame. Run it after changing [`app/lib/ui.js`](../app/lib/ui.js), then put the launcher back with `.\push.ps1 app\app.js`.
 
 ## Serial commands & the REPL
 

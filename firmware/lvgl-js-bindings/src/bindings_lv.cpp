@@ -492,6 +492,38 @@ static JSValue js_widget_clean(JSContext *ctx, JSValueConst this_val, int, JSVal
   return JS_DupValue(ctx, this_val);
 }
 
+// widget.delete() — delete this one widget and its subtree.
+//
+// `.clean()` empties a container; this removes a single child, which is what a
+// diffing layer needs when one item leaves a list and its siblings stay. Same
+// hazard as `.clean()`: deleting the widget LVGL is currently dispatching an
+// event to is not safe, so defer it a tick (or let the UI runtime's batched
+// render do it, which already runs outside dispatch).
+//
+// Refuses the active screen: nothing in a script owns that, and deleting it
+// leaves LVGL with no screen to draw.
+static JSValue js_widget_delete(JSContext *ctx, JSValueConst this_val, int, JSValueConst *) {
+  lv_obj_t *obj = jsvm_arg_widget(ctx, this_val);
+  if (!obj) return JS_EXCEPTION;
+  if (obj == lv_screen_active())
+    return JS_ThrowTypeError(ctx, "the screen cannot be deleted (use .clean())");
+  lv_obj_delete(obj);
+  return JS_UNDEFINED;
+}
+
+// widget.index() / .index(n) — read or set this widget's position among its
+// parent's children. Reordering existing widgets is how a keyed list survives a
+// reshuffle without deleting and rebuilding the rows that only moved.
+static JSValue js_widget_index(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  lv_obj_t *obj = jsvm_arg_widget(ctx, this_val);
+  if (!obj) return JS_EXCEPTION;
+  if (argc < 1) return JS_NewInt32(ctx, static_cast<int32_t>(lv_obj_get_index(obj)));
+  int32_t n = 0;
+  JS_ToInt32(ctx, &n, argv[0]);
+  lv_obj_move_to_index(obj, n);
+  return JS_DupValue(ctx, this_val);
+}
+
 // widget.bounds() -> {x, y, w, h} of the content area in screen coordinates —
 // what you need to place children under a touch point.
 static JSValue js_widget_bounds(JSContext *ctx, JSValueConst this_val, int, JSValueConst *) {
@@ -595,6 +627,8 @@ void js_install_lv(JSContext *ctx) {
   JS_SetPropertyStr(ctx, wproto, "push", JS_NewCFunction(ctx, js_widget_push, "push", 1));
   JS_SetPropertyStr(ctx, wproto, "target", JS_NewCFunction(ctx, js_widget_target, "target", 1));
   JS_SetPropertyStr(ctx, wproto, "clean", JS_NewCFunction(ctx, js_widget_clean, "clean", 0));
+  JS_SetPropertyStr(ctx, wproto, "delete", JS_NewCFunction(ctx, js_widget_delete, "delete", 0));
+  JS_SetPropertyStr(ctx, wproto, "index", JS_NewCFunction(ctx, js_widget_index, "index", 1));
   JS_SetPropertyStr(ctx, wproto, "bounds", JS_NewCFunction(ctx, js_widget_bounds, "bounds", 0));
   JS_SetClassProto(ctx, jsvm_widget_class, wproto);
 

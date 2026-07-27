@@ -36,7 +36,7 @@ The feasibility estimates made before any code was written, against what it actu
 | JS heap | 256 KB – 1 MB, in PSRAM | **~80 KB at rest**; a 20k-object stress peaked at 3.26 MB and was fully reclaimed by GC |
 | Task stack | 16–32 KB | 32 KB `loopTask`, with the VM capped at 20 KB so it hits its own guard first |
 | CPU | "fine at UI event rates" | `1+1` in 1.1 ms; the whole 4-tab UI builds in 74 ms; rendering is untouched |
-| Whole firmware | not estimated | 1.79 MB, 56% of the 3 MB app partition |
+| Whole firmware | not estimated | 1.79 MB at v1, 56% of the 3 MB app partition; 1.94 MB (64%) now, having since gained `fs`, `fetch`, text input, and the app model |
 
 Every estimate was conservative, which is the desirable direction. The engine landed about 14% under the low end of the flash estimate, and roughly 46% under the high end.
 
@@ -51,12 +51,12 @@ That ordering was the single most useful decision. The one question that could h
 | Predicted risk | Outcome |
 |---|---|
 | QuickJS build friction on Xtensa | **Mild.** Five one-line type fixes where `int` locals meet `int32_t*` parameters, because this toolchain types `int32_t` as `long`. The JerryScript escape hatch was never needed. |
-| `JSValue` lifetime bugs | **The real risk, and it stayed the hardest part.** Handled by the `LV_EVENT_DELETE` hook plus a global registry for screen-level bindings; five consecutive reload cycles leaked no internal RAM. One hazard emerged later than the design: `.clean()` made widget handles capable of dangling within a single run. Documented in [`architecture.md`](architecture.md), not yet hardened. |
-| Scope creep | **Held, then grew deliberately.** v1 shipped at roughly 15 functions. Recreating the C demo added tabview, chart, `.bounds()`, `.clean()`, `.push()`, and `.addTab()`, taking it to about 20. The growth was driven by a concrete parity goal rather than speculation, which is the distinction worth keeping. |
+| `JSValue` lifetime bugs | **The real risk, and it stayed the hardest part.** Handled by the `LV_EVENT_DELETE` hook plus a global registry for screen-level bindings; five consecutive reload cycles leaked no internal RAM. One hazard emerged later than the design: `.clean()` made widget handles capable of dangling within a single run, and writing through a stale one silently corrupted the heap. Since hardened: `arg_widget()` validates with `lv_obj_is_valid()` and throws a catchable `TypeError`, at no measurable frame cost. See [`runtime-architecture.md`](runtime-architecture.md). |
+| Scope creep | **Held, then spent deliberately.** v1 shipped at roughly 15 functions. Parity with the C demo added tabview, chart, `.bounds()`, `.clean()`, `.push()` and `.addTab()`, taking it to about 20; `fs`, `fetch`, text input, and the app model took it to 11 widget makers plus around 30 module functions. Each step answered a concrete need rather than a speculative one, which is the distinction worth keeping: the surface grew where leaving it alone would have pushed the same work onto every app. |
 | PSRAM latency for the JS heap | **Non-issue.** JavaScript runs at event rate, not pixel rate, exactly as predicted. |
 
 One risk was not predicted and should have been. QuickJS's pending-job queue is normally drained by quickjs-libc's event loop, which isn't vendored here, so promises and `async`/`await` queued silently and never ran while everything else worked. The lesson generalizes: when you vendor a runtime's core and drop its host layer, enumerate what that host layer was doing for you.
 
 ## What this is not
 
-Not an lvgljs port, not React, not npm. It is "MicroPython-style scripting, but JavaScript, for this board": the 20% of lvgljs that delivers 80% of the point, which is UI logic as editable data.
+Not an lvgljs port, not React, not npm. It is "MicroPython-style scripting, but JavaScript": the 20% of lvgljs that delivers 80% of the point, which is UI logic as editable data. It was built for this board and has only run on this board, but nothing above the sketch knows which panel it is drawing on. See [`portability.md`](portability.md) for what that does and doesn't buy.

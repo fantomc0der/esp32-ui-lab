@@ -26,7 +26,7 @@ One thing a pinned board still draws in that corner: if the pinned app asks abou
 
 Two ways to ship a script:
 
-- **SD card:** copy [`app/app.js`](../app/app.js) to the root of a FAT-formatted microSD, insert it, long-press **BOOT** (≥ 700 ms). The card is re-mounted on every reload, so it can be swapped while the board is powered, and it always wins over the flash partition.
+- **SD card:** copy [`app/app.js`](../app/app.js) to the root of a FAT-formatted microSD, insert it, long-press **BOOT** (≥ 700 ms). The card always wins over the flash partition. It is mounted once in `setup()` and handed to the supervisor, so swapping cards needs a reset rather than just a reload: a reload re-reads the file, not the filesystem.
 - **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. The board writes the script and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
 
 [`push.ps1`](../push.ps1) drives the serial route, which is worth using rather than pasting by hand:
@@ -49,10 +49,12 @@ Note that the stored copy always ends with exactly one more newline than the fil
 [`app/selftest.js`](../app/selftest.js) is a script you deploy exactly like `app.js`. It exercises the binding surface and prints a `PASS`/`FAIL` line per check, ending with a count:
 
 ```
-SELFTEST 35 passed, 0 failed
+SELFTEST 61 passed, 0 failed
 ```
 
-Anything other than `0 failed` means the bindings regressed. It covers widget construction, props, values, chaining, misuse rejection, `sys.*`, timers, and promise resolution, plus regression checks for two use-after-free bugs that were found on hardware (a timer callback stopping its own timer, and a widget handle used after its container was cleaned). Touch-driven behaviour is not covered, since a tap cannot be synthesized. Run it after any change to the binding library, then re-deploy `app.js`.
+Anything other than `0 failed` means the bindings regressed. It covers widget construction, props, values, chaining, misuse rejection, `sys.*`, `fs.*`, timers, and promise resolution, plus regression checks for two use-after-free bugs that were found on hardware (a timer callback stopping its own timer, and a widget handle used after its container was cleaned). Touch-driven behaviour is not covered, since a tap cannot be synthesized, and neither is anything needing a network. Run it after any change to the binding library, then re-deploy `app.js`.
+
+It is also the only functional test of the binding layer, and it cannot run in CI: it executes on the board and reports over serial. CI syntax-checks every script and verifies they only call bindings the C layer registers ([`tools/check-js-api.mjs`](../tools/check-js-api.mjs)), which catches a typo or a removed binding but not a behavioural regression. Now that the supervisor lives in the library rather than in each sketch, a bug there reaches every board, which makes running this by hand after binding-layer changes the actual gate.
 
 ## Serial commands & the REPL
 
@@ -90,10 +92,14 @@ The REPL shares the app's global scope, so `sys.heap()`, poking widgets held in 
 [boot] waveshare-s3-touch-147 starting
 [boot] display 320x172
 [touch] AXS5106L ok, id = 51 06 01
-[app] running ffat:/app.js
-app.js: vitals dashboard up (4 tabs)
-[js] ffat:/app.js: eval ok in 74 ms
-[boot] ready — serial is a JS REPL; 'reload' = reload app.js
+[app] storage: sd ok, flash ok
+[app] running /app.js
+[js] vm ready: 90048 bytes to start, 8203788 free for scripts
+launcher: 3 app(s) found
+[js] /app.js: eval ok in 74 ms
+[app] ready — serial is a JS REPL; 'reload' restarts the app, 'home' opens the launcher
 ```
+
+The `[boot]` lines come from the sketch and the `[app]`/`[js]` lines from the library, which is the seam visible in the log: everything after storage is mounted is board-independent. On a pinned board the launcher line is replaced by `[app] <path> is pinned — skipping the launcher`.
 
 A script that throws at boot is reported over serial (message + stack) and replaced by the fallback screen; the firmware never goes down with the script. Engine-level traps (heap poisoning vs `usable_size`, the promise job pump, the DTR/RTS bootloader trap) live in [`engine-notes.md`](engine-notes.md).

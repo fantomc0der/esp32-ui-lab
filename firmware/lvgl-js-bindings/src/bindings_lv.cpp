@@ -5,7 +5,7 @@
 // it and frees it at one place; nothing here stores a JSValue.
 //
 // Adding a widget is three lines: a WidgetKind, a case in js_lv_make's switch,
-// and a row in kMakers. All nine share apply_props, which is why this file has
+// and a row in kMakers. They all share apply_props, which is why this file has
 // no per-widget structure — there is nothing per-widget to hold.
 
 #include "jsvm_internal.h"

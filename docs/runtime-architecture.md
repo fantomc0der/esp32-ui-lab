@@ -32,13 +32,16 @@ Inside the binding library, one file owns correctness and the rest own vocabular
 | `jsvm_app.cpp` | the supervisor: the boot chain, the corner button, the serial protocol, the built-in fallback script |
 | `bindings_lv.cpp` | the `lv` global: widget constructors, props, widget methods |
 | `bindings_sys.cpp` | the `sys` global |
-| `bindings_wifi.cpp` | the `wifi` global |
+| `bindings_fs.cpp` | the `fs` global |
+| `bindings_wifi.cpp` | the `wifi` global and `fetch` |
 
-The rule that keeps the split honest: **a module never stores a `JSValue`.** Anything that must outlive a call is handed to the core through `jsvm_bind_event()` or `jsvm_create_timer()`, which dup it and free it at one place. That is why the ownership rules can be reasoned about by reading a single file, even though four files can hold callbacks.
+The rule that keeps the split honest: **a module hands its callbacks to the core rather than owning them.** Anything that must outlive a call goes through `jsvm_bind_event()` or `jsvm_create_timer()`, which dup it and free it at one place, so the ownership rules for every event handler and every timer can be reasoned about by reading `jsvm_core.cpp` alone.
 
-`jsvm_core.cpp` is also the composition root, so it is the one place naming the modules: it calls each `js_install_*()` on every start, since a reload builds a fresh context. Modules holding state across calls also expose a teardown, which the core runs first, before any widget is deleted. Today only `wifi` needs one. `sys` and `wifi` can be compiled out entirely with `-DJSVM_WITH_SYS=0` / `-DJSVM_WITH_WIFI=0`, which is what makes the library usable on a board with no radio without editing it.
+`bindings_wifi.cpp` is the one module that does hold `JSValue`s itself, because neither of its two cases fits that shape: a scan callback is a single slot rather than one per widget (`g_scan.cb`), and `fetch` has to keep the resolve and reject functions `JS_NewPromiseCapability` hands back (`g_fetch_resolve`, `g_fetch_reject`). Both are released through `js_teardown_wifi()`, which the core calls first during teardown, and both follow the trampoline discipline described below: hold a reference across the call, release the slot *before* settling, so a `.then()` handler can start the next request. `fetch` adds one wrinkle a widget binding never needs, because its work outlives the slot: a worker task may still be mid-request when teardown abandons it, so `js_teardown_wifi()` bumps a generation counter rather than trying to kill the task, and a late result is dropped instead of settling a promise from a dead context.
 
-Per-widget files were considered and rejected. `lv_binding_js` needs them because a React reconciler wants per-component prop diffing; here all nine widgets share one `apply_props`, so a widget is an enum value, a `switch` case, and a table row. Nine files of ten lines would be more structure describing less code.
+`jsvm_core.cpp` is also the composition root, so it is the one place naming the modules: it calls each `js_install_*()` on every start, since a reload builds a fresh context. Modules holding state across calls also expose a teardown, which the core runs first, before any widget is deleted. Today only `wifi` needs one. `sys`, `fs` and `wifi` can be compiled out entirely with `-DJSVM_WITH_SYS=0` / `-DJSVM_WITH_FS=0` / `-DJSVM_WITH_WIFI=0`, which is what makes the library usable on a board with no radio or no storage without editing it.
+
+Per-widget files were considered and rejected. `lv_binding_js` needs them because a React reconciler wants per-component prop diffing; here all eleven widgets share one `apply_props`, so a widget is an enum value, a `switch` case, and a table row. Eleven files of ten lines would be more structure describing less code.
 
 `jsvm_app.cpp` is a second boundary inside the library, and a more recent one. It holds everything about *running* scripts that turned out not to depend on the board: which file boots and in what order, what happens when one throws, the corner button, the long-press, and the serial protocol. That code lived in the sketch until it became clear a second board would have to copy it verbatim and then drift, which is the specific failure a closed port branch demonstrated. It is optional: a sketch with its own answers can drive `jsvm_start()`/`jsvm_stop()`/`jsvm_pump()` directly and never call `jsvm_app_begin()`.
 
@@ -99,7 +102,7 @@ The script source is read into a PSRAM buffer, evaluated, and freed; QuickJS cop
 
 Take `lv.button(parent, { text: "Scan", w: 84 })`.
 
-All nine constructors are the same C function. `js_lv_make` is registered once per widget type with `JS_NewCFunctionMagic`, and QuickJS passes back the `magic` integer it was registered with, which is the `WidgetKind` enum value. That is why adding a widget type is a two-line change rather than a new function.
+All eleven constructors are the same C function. `js_lv_make` is registered once per widget type with `JS_NewCFunctionMagic`, and QuickJS passes back the `magic` integer it was registered with, which is the `WidgetKind` enum value. That is why adding a widget type is a two-line change rather than a new function.
 
 The call unwraps its parent with `arg_widget()`, which is `JS_GetOpaque2` against the widget class ID: it both fetches the `lv_obj_t*` and type-checks the JS object, throwing if a script passes something that is not a widget. It creates the LVGL object, applies props, and wraps the result.
 
@@ -131,11 +134,12 @@ This is the part to understand before changing anything, because it is where a m
 
 **Every JSValue stored on the C side is duplicated once at store time and released at exactly one well-defined point.**
 
-| Stored value | Duped at | Released at |
+| Stored value | Acquired at | Released at |
 |---|---|---|
-| `EventBinding.fn`, `.widget` | `.on()` | the widget's `LV_EVENT_DELETE` hook, or the `jsvm_stop()` sweep |
-| `TimerBinding.fn`, `.self` | `lv.timer()` | `.stop()`, or `jsvm_stop()` |
-| `g_wifi.cb` | `wifi.scan()` | scan completion, released *before* the callback runs, or `jsvm_stop()` |
+| `EventBinding.fn`, `.widget` | `.on()`, duped | the widget's `LV_EVENT_DELETE` hook, or the `jsvm_stop()` sweep |
+| `TimerBinding.fn`, `.self` | `lv.timer()`, duped | `.stop()`, or `jsvm_stop()` |
+| `g_scan.cb` | `wifi.scan()`, duped | scan completion, released *before* the callback runs, or `js_teardown_wifi()` |
+| `g_fetch_resolve`, `g_fetch_reject` | `fetch()`, owned outright: `JS_NewPromiseCapability` hands back references rather than borrowing them, so there is nothing to dup | the settle in `fetch_poll_timer()`, released *before* settling, or `js_teardown_wifi()` |
 
 Two QuickJS classes exist. `LvWidget` stores an `lv_obj_t*` and `LvTimer` stores a `TimerBinding*`. Neither has a finalizer, for different reasons.
 
@@ -233,7 +237,7 @@ There is no event loop in the usual sense. Two mechanisms cover what scripts nee
 
 | Region | Contents |
 |---|---|
-| Flash (3 MB app partition) | firmware, 1.79 MB, of which the QuickJS engine is ~429 KB |
+| Flash (3 MB app partition) | firmware, 1.94 MB (64%), of which the QuickJS engine is ~429 KB |
 | Flash (9.9 MB FATFS) | `app.js` when deployed to internal storage |
 | Internal SRAM | two LVGL draw buffers, 13,440 bytes each, which **must** be internal and DMA-capable because SPI DMA cannot reach PSRAM; the LVGL object tree and styles; the WiFi stack; ~350 bytes of QuickJS bookkeeping |
 | PSRAM | the entire JS heap, ~80 KB at rest, via the custom `JSMallocFunctions`; the `app.js` source buffer while loading |
@@ -249,10 +253,14 @@ The allocator has one non-negotiable rule, learned by crashing: `js_malloc_usabl
 
 **A new event:** add a row to `kEvents`. The trampoline and the DELETE-hook ownership come for free.
 
-**A new native call:** write a `JSValue fn(JSContext*, JSValueConst, int argc, JSValueConst*)`, check `argc` before touching `argv`, and register it in `install_globals()`. If it stores a JS callback, add a row to the ownership table above and make sure `jsvm_stop()` releases it.
+**A new native call:** write a `JSValue fn(JSContext*, JSValueConst, int argc, JSValueConst*)`, check `argc` before touching `argv`, and register it with `JS_SetPropertyStr` in the owning module's `js_install_*()` (or `install_core_globals()` in the core, for something that belongs to no module). Going through `JS_SetPropertyStr` is also what puts it in front of `tools/check-js-api.mjs`, which derives the whole surface by scanning for that call, so a new binding is checked against the scripts without touching the checker. If it stores a JS callback, add a row to the ownership table above and make sure it is released on teardown.
+
+**A new module:** write `js_install_<name>()` taking the context, call it from `jsvm_core.cpp`'s start path, and guard the file with a `JSVM_WITH_<NAME>` macro defaulted to 1 in `js_bindings.h` so a board can compile it out. Hand callbacks to the core rather than storing them; if the module genuinely cannot (the two `wifi` cases above), add a `js_teardown_<name>()` and call it from the core's teardown.
 
 **Anything involving another task:** re-read the threading rule first. Queue the payload, do the work in `loop()`.
 
 ## Deliberate limitations
 
-One script file, no module system and no `import`. No filesystem access from JS, by design: the host owns storage. Three font sizes, 14, 16 and 20, because each compiled font costs flash. No widget deletion beyond `.clean()`. No `setTimeout`. The surface is about twenty functions because every addition is a permanent maintenance and correctness obligation, and the [stated risk](design-rationale.md) was scope creep, not scarcity.
+One script file per app, no module system and no `import`; `sys.launch()` switches whole apps rather than composing them. Five font sizes, whichever montserrat faces `lv_conf.h` compiles in, because each one costs flash. No widget deletion beyond `.clean()`. No `setTimeout`; `lv.timer` fills that role. One `fetch` in flight at a time.
+
+The surface is 11 widget makers and around 30 module functions, held there because every addition is a permanent maintenance and correctness obligation, and the [stated risk](design-rationale.md) was scope creep rather than scarcity. Two of the original limitations have since been spent deliberately rather than eroded: `fs` exists because an app that cannot keep a config or cache a response has to be rewritten to change a setting, and `textarea`/`keyboard` exist because Wi-Fi setup needs a password typed on the panel with nothing else attached. Each was a case where the missing binding pushed the work onto every app author instead of paying for it once.

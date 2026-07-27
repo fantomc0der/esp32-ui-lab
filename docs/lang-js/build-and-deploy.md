@@ -36,12 +36,9 @@ cd lang-js
 .\push.ps1 app\selftest.js -Dest /app.js
 ```
 
-The destination mirrors the repo layout under `app\`, because that layout *is* the card layout. Two failure modes are the reason the script exists, and both leave a file that still parses, so the board reloads without complaint and the damage only shows on the panel:
+The destination mirrors the repo layout under `app\`, because that layout *is* the card layout.
 
-- **Encoding.** A terminal (or .NET's `SerialPort`, which defaults to US-ASCII) that is not sending UTF-8 rewrites every non-ASCII character as `?`. In `weather.js` that is the degree sign, and the symptom is a temperature reading `23?` on the panel.
-- **Pacing.** The host reads serial one character at a time from `loop()`, so a file pushed as fast as the port accepts it loses bursts out of the middle.
-
-`push.ps1` forces UTF-8, paces the lines, and then reads the file back off the board and compares a position-sensitive checksum against the local copy, so a mangled push fails loudly instead of quietly. Raise `-LineDelayMs` if a mismatch ever repeats.
+It exists because both ways this route goes wrong leave a file that still parses, so the board reloads without complaint and the damage only shows on the panel: the encoding trap under [Serial commands & the REPL](#serial-commands--the-repl) below, and pacing — the host reads serial one character at a time from `loop()`, so a file pushed as fast as the port accepts it loses bursts out of the middle. `push.ps1` forces UTF-8, paces the lines, and then reads the file back off the board and compares a position-sensitive checksum against the local copy, so a mangled push fails loudly. Raise `-LineDelayMs` if a mismatch ever repeats.
 
 Note that the stored copy always ends with exactly one more newline than the file on disk: the protocol writes `line + "\n"` for every line, including the last. That is expected and is what the checksum accounts for.
 
@@ -79,7 +76,9 @@ $port.Encoding = [System.Text.Encoding]::UTF8
 Get-Content script.js -Encoding UTF8 | ForEach-Object { $port.WriteLine($_) }
 ```
 
-Copying the file onto the SD card sidesteps this entirely. The compiled fonts do cover Latin-1, so `°` renders fine once it actually arrives intact.
+Copying the file onto the SD card sidesteps this entirely, and so does [`push.ps1`](../../lang-js/push.ps1), which sets the encoding and then verifies the transfer. The compiled fonts do cover Latin-1, so `°` renders fine once it actually arrives intact.
+
+Worth knowing that this section existing was not enough: the trap was documented here and still cost an afternoon, because the natural way to script the upload (.NET `SerialPort`) defaults to ASCII and reports nothing. That is the argument for using the script rather than rolling the loop again.
 
 The REPL shares the app's global scope, so `sys.heap()`, poking widgets held in top-level `const`s, or arming a quick `lv.timer` all work live.
 

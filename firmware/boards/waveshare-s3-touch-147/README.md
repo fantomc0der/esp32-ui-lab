@@ -16,7 +16,9 @@ Both filesystems are mounted once in `setup()` and handed to the supervisor, whi
 
 The shipped app lives at [`app/app.js`](../../../app/app.js); copy it to a FAT-formatted card's root.
 
-Pinning replaces step 1: with a pin set (long-press an app in the launcher, or `pin <path>` over serial), the boot goes straight to that script and the firmware draws nothing over it, so the board reads as a single-app appliance rather than a menu. A long-press of **BOOT** still opens the launcher — the only way back once the button is gone, and where you unpin.
+Pinning replaces step 1: with a pin set (long-press an app in the launcher, or `pin <path>` over serial), the boot goes straight to that script and the firmware draws nothing over it, so the board reads as a single-app appliance rather than a menu. A long-press of **BOOT** still opens the launcher, which is the only way back once the corner button is gone, and where you unpin.
+
+It reads as an appliance rather than being locked into one. The launcher still runs any app you tap there, and a long-press retargets the pin to that app, replacing the previous one without asking. See [Pinning one app](../../../docs/binding-api.md#pinning-one-app) for the full rules.
 
 ## The corner button
 

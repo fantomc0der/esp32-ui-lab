@@ -22,6 +22,8 @@ Flashing is a one-time step; after that the UI is data, not firmware. The board 
 
 To ship one app rather than a menu, pin it: long-press its row in the launcher (or send `pin /apps/clock.js`). The board then boots straight into that script with nothing drawn over it. A long-press of **BOOT** still opens the launcher, which is where you release the pin.
 
+Pinning changes what boots and what the firmware draws over it; it does not stop other apps running. The launcher still lists everything in `/apps` and still launches it, so a pinned board is an appliance by default rather than by restriction. In the launcher, a tap runs an app without touching the pin, and a long-press moves the pin to that app, replacing whatever was pinned before with no confirmation. Full rules, including the back arrow you get after tapping an app on a pinned board: [Pinning one app](binding-api.md#pinning-one-app).
+
 One thing a pinned board still draws in that corner: if the pinned app asks about the network and none is set up, a Wi-Fi button appears and opens `/apps/wifi.js`, with a back arrow to return. Pin an app that needs the network on a board you have not joined to one, and you can still fix that from the touchscreen.
 
 Two ways to ship a script:
@@ -64,7 +66,7 @@ While the firmware runs, the serial port accepts one line at a time:
 |---|---|
 | `home` | open the launcher (same as the on-screen home button, or a BOOT long-press) |
 | `reload` | restart the current app from storage |
-| `pin [path]` | boot straight into this app from now on and stop drawing over it. With no path it pins whatever is running |
+| `pin [path]` | boot straight into this app from now on and stop drawing over it. With no path it pins whatever is running. Replaces any existing pin, and refuses to pin the launcher |
 | `unpin` | back to booting the launcher |
 | `ls [dir]` | list a directory, default `/` |
 | `rm <path>` | delete a file |

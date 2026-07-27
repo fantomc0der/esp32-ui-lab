@@ -5,10 +5,14 @@
 // so this file never has to think about the return trip.
 //
 // Long-press a row to pin that app. A pinned board boots straight into it and
-// the firmware draws nothing over it, which is what turns the device from a
-// launcher with apps on it into an appliance that runs one thing. This screen
-// stays reachable with a long-press of BOOT, and long-pressing the pinned row
-// again releases it.
+// the firmware draws nothing over it, which is what makes the device read as an
+// appliance rather than a launcher with apps on it. This screen stays reachable
+// with a long-press of BOOT, and long-pressing the pinned row again releases it.
+//
+// Nothing here is exclusive: a tap still runs any app without touching the pin,
+// and long-pressing a different row moves the pin to it. Which gestures manage
+// the pin is this file's decision, not the firmware's, so a replacement
+// launcher can choose otherwise.
 
 const scr = lv.screen().set({ bg: "#0B1622" });
 

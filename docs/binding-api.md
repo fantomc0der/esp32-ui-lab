@@ -135,7 +135,7 @@ Credentials are write-only by design: a script can set them but no API hands the
 - `sys.backlight(pct)` → LEDC PWM, clamped 0–100, hardware floor keeps the panel faintly visible
 - `sys.info()` → `{ model, rev, cores, mhz, flashMB, psramMB, lvgl, quickjs }`
 - `sys.launch(path)` → asks the firmware to run a different script. It returns immediately and your app keeps running until the current call finishes; the switch happens after that. It cannot be synchronous, because tearing down the VM mid-call would free the function that is executing.
-- `sys.pin(path)` → makes that script the one the board boots into, instead of the launcher. Stored in NVS, so it survives reboots and reflashes. Returns `true` on success; throws on a relative path. It does not switch apps — pair it with `sys.launch(path)` if you want both.
+- `sys.pin(path)` → makes that script the one the board boots into, instead of the launcher. Stored in NVS, so it survives reboots and reflashes. Returns `true` on success; throws on a relative path. It does not switch apps: pair it with `sys.launch(path)` if you want both. Any existing pin is replaced without warning, and the path is not checked for existence or against the launcher, so pinning is as permissive as the caller.
 - `sys.unpin()` → clears the pin; the launcher is the boot script again.
 - `sys.pinned()` → the pinned path, or `null`. The path is whatever was pinned, which may name a script that has since been deleted.
 
@@ -148,7 +148,7 @@ You never have to provide a way back. The firmware draws a button on LVGL's top 
 That corner holds at most one control, and the firmware picks it:
 
 - **home** — back to the launcher, on a board with no pin
-- **back** — back to the pinned app, when a pin is set and you are somewhere else
+- **back** — to the pinned app, when a pin is set and you are somewhere else. It goes to the pin rather than to wherever you came from, so on a pinned board an app you opened *from* the launcher offers a back arrow that lands on the pinned app instead of returning you to the launcher
 - **Wi-Fi** — to `/apps/wifi.js`, when your app has asked about the network and cannot get one
 - nothing at all, when you are already where the button would take you
 
@@ -158,13 +158,32 @@ It stays hidden for failures that retrying can still resolve: a dropped link, a 
 
 ## Pinning one app
 
-Pinning turns the board into an appliance: with a pin set, boot goes straight to that script and **the firmware draws nothing in the corner while that app is running**, so nothing on screen refers to a launcher that is no longer part of the product. That corner is yours again, and a pinned app should provide whatever navigation it needs itself.
+A pin does two separate things, and it is worth reading them as two, because only the first is a lock of any kind:
 
-The two exceptions are the ones a pinned board would otherwise have no answer for. If your pinned app wants a network it cannot get — none configured, a rejected password, a network that has gone away — the Wi-Fi button appears; tapping it opens the setup app, and from there the corner shows a back arrow to your app. Both are gone again as soon as the pinned app is what's running and has a network.
+1. **It changes what boots.** The board runs that script instead of the launcher.
+2. **It changes what the firmware draws over a running app.** While the pinned app is what's running, the corner is empty, so nothing on screen refers to a launcher that is not part of the product. That corner is yours again, and a pinned app should provide whatever navigation it needs itself.
 
-The escape hatch that remains is the hardware one: a long-press of BOOT (≥ 700 ms) always opens the launcher, whatever is pinned. That is how you reach a board you have pinned, and the launcher is where you release the pin — long-press an app row to pin it, long-press the highlighted row to unpin. Over serial, `pin [path]` and `unpin` do the same thing.
+What a pin is *not* is a restriction on which apps can run. The launcher is still there, still reachable, and still switches apps. So "appliance" describes the boot path and the clean corner, not a kiosk that has been locked down: there is no mode in this firmware where only one script can execute.
 
-A pin that names a missing or broken script costs you the appliance behaviour, not the board: the load fails, and the firmware falls back to the launcher exactly as it does for any other app.
+The two things the firmware still draws over a pinned app are the ones a pinned board would otherwise have no answer for. If your pinned app wants a network it cannot get (none configured, a rejected password, a network that has gone away) the Wi-Fi button appears; tapping it opens the setup app, and from there the corner shows a back arrow to your app. Both are gone again as soon as the pinned app is what's running and has a network.
+
+### Reaching a pinned board, and what the launcher does there
+
+A long-press of BOOT (≥ 700 ms) always opens the launcher, whatever is pinned. It is the only route in on a pinned board, since the corner draws nothing, and it is deliberately not advertised on screen: discovering it means reading this page, the board's README, or the source.
+
+Once you are in the launcher, both gestures on an app row stay live, and they do different things:
+
+| Gesture on a row | Effect | Pin afterwards |
+|---|---|---|
+| Tap | runs that app now | unchanged |
+| Long-press an unpinned row | **repins to that app**, silently replacing the previous pin | the row you held |
+| Long-press the highlighted row | releases the pin | none |
+
+Two consequences of that middle row are easy to meet by accident. Repinning is a plain overwrite with no confirmation: the old pin is discarded, the highlight and the `pinned:` label move, and nothing asks. And a tap does not repin, so an app you open this way is running on a board whose pin points elsewhere, which is the one case where the corner shows a back arrow that does not go back: it goes to the pinned app, per [the corner rules above](#apps-and-getting-back). Getting to the launcher from there is another BOOT long-press.
+
+Over serial, `pin [path]` and `unpin` do the same thing, with one difference worth knowing: `pin` refuses to pin the launcher itself, while `sys.pin()` from a script does not check. Pinning `/app.js` would leave every app showing a back arrow to the launcher rather than a home icon, which works but reads oddly.
+
+A pin that names a missing or broken script costs you the appliance behaviour, not the board: the load fails, and the firmware falls back to the launcher exactly as it does for any other app. A pin that no `/apps` row accounts for still gets a row of its own there, marked `(missing)` when the file is genuinely gone, because a pin you cannot see is a pin you cannot release without a serial cable.
 
 One thing to know when building multi-screen apps: rebuilding the screen from inside a click handler deletes the widget LVGL is currently dispatching to. Defer it by a tick instead, which is what [`apps/wifi.js`](../app/apps/wifi.js) does:
 

@@ -201,6 +201,10 @@ A pin is a single NVS string, written by `sys.pin()` or the `pin` serial command
 
 Two properties are worth preserving if this changes. A pinned script that fails to load still falls back to the launcher, so a bad pin cannot brick the panel. And the long-press deliberately ignores the pin: it is the only route back to the launcher once the corner button no longer offers one, and therefore the only way to unpin a board with nothing plugged into it. A board that sets `cfg.home_button_pin = -1` gives that guarantee up, which is a real choice rather than an omission.
 
+What the firmware does *not* enforce is single-app operation. A pin changes the boot target and the corner, and nothing else: the launcher remains reachable and remains able to launch anything. So the two states the corner distinguishes are not two modes of the device, and the difference between a pinned board and an unpinned one is a default plus a hidden control, not a capability boundary. Worth knowing before adding anything that reads like a kiosk guarantee, because there is no mechanism here that would back one.
+
+The rest of the pin's behaviour is not firmware at all, which is easy to miss when tracing it. `cornerBackTarget()` returns the pinned app rather than a history entry, so Back after tapping an app from the launcher goes to the pin instead of returning to the launcher: there is no navigation stack, by choice, since one screen of history would have to survive a VM teardown that deliberately destroys everything a script created. And retargeting a pin is a gesture in [`app/app.js`](../app/app.js), not a supervisor feature. `sys.pin()` overwrites unconditionally, and the launcher wires a row long-press straight to it, so which gestures manage a pin is a decision a replacement launcher gets to make differently.
+
 ## Knowing an app wants the network
 
 `jsvm_network_setup_needed()` is true when the running script has called `fetch()` or `wifi.status()`, is not connected, and a person at the setup screen could do something about that. It is what the corner button's Wi-Fi state is gated on, and it exists so that a board pinned to a network app is not a dead end.

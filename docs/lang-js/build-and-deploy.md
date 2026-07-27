@@ -27,7 +27,22 @@ One thing a pinned board still draws in that corner: if the pinned app asks abou
 Two ways to ship a script:
 
 - **SD card:** copy [`lang-js/app/app.js`](../../lang-js/app/app.js) to the root of a FAT-formatted microSD, insert it, long-press **BOOT** (≥ 700 ms). The card is re-mounted on every reload, so it can be swapped while the board is powered, and it always wins over the flash partition.
-- **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. js-host writes the script to the internal FATFS partition and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
+- **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. js-host writes the script and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
+
+[`lang-js/push.ps1`](../../lang-js/push.ps1) drives the serial route, which is worth using rather than pasting by hand:
+
+```powershell
+cd lang-js
+.\push.ps1 app\apps\weather.js         # -> /apps/weather.js, then reloads it
+.\push.ps1 app\app.js                  # -> /app.js
+.\push.ps1 app\selftest.js -Dest /app.js
+```
+
+The destination mirrors the repo layout under `app\`, because that layout *is* the card layout.
+
+It exists because both ways this route goes wrong leave a file that still parses, so the board reloads without complaint and the damage only shows on the panel: the encoding trap under [Serial commands & the REPL](#serial-commands--the-repl) below, and pacing — the host reads serial one character at a time from `loop()`, so a file pushed as fast as the port accepts it loses bursts out of the middle. `push.ps1` forces UTF-8, paces the lines, and then reads the file back off the board and compares a position-sensitive checksum against the local copy, so a mangled push fails loudly. Raise `-LineDelayMs` if a mismatch ever repeats.
+
+Note that the stored copy always ends with exactly one more newline than the file on disk: the protocol writes `line + "\n"` for every line, including the last. That is expected and is what the checksum accounts for.
 
 ## Checking the binding layer
 
@@ -63,7 +78,9 @@ $port.Encoding = [System.Text.Encoding]::UTF8
 Get-Content script.js -Encoding UTF8 | ForEach-Object { $port.WriteLine($_) }
 ```
 
-Copying the file onto the SD card sidesteps this entirely. The compiled fonts do cover Latin-1, so `°` renders fine once it actually arrives intact.
+Copying the file onto the SD card sidesteps this entirely, and so does [`push.ps1`](../../lang-js/push.ps1), which sets the encoding and then verifies the transfer. The compiled fonts do cover Latin-1, so `°` renders fine once it actually arrives intact.
+
+Worth knowing that this section existing was not enough: the trap was documented here and still cost an afternoon, because the natural way to script the upload (.NET `SerialPort`) defaults to ASCII and reports nothing. That is the argument for using the script rather than rolling the loop again.
 
 The REPL shares the app's global scope, so `sys.heap()`, poking widgets held in top-level `const`s, or arming a quick `lv.timer` all work live.
 

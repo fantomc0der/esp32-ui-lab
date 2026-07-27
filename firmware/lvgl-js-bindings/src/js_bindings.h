@@ -121,6 +121,58 @@ const char *jsvm_pinned_app();
 bool jsvm_set_pinned_app(const char *path);
 #endif
 
+// ---- the app supervisor -----------------------------------------------------
+//
+// Optional, and the reason a board sketch is short. It owns the parts of running
+// scripts that are policy rather than hardware: which file boots, what happens
+// when one throws, the button the firmware draws so no app can trap you, and the
+// serial protocol that uploads a script and reloads it.
+//
+// A sketch that wants its own answers to those questions can ignore all of this
+// and drive jsvm_start()/jsvm_stop()/jsvm_pump() directly.
+
+struct JsvmAppConfig {
+  // Where scripts are read from. Unprefixed paths prefer `sd` and fall back to
+  // `flash`; a "flash:" prefix always means `flash`. Either may be null. These
+  // are also what the fs bindings get, so there is no need to call
+  // jsvm_set_filesystem() as well.
+  fs::FS *sd = nullptr;
+  fs::FS *flash = nullptr;
+
+  // The script that lists the others. Everything else is reached from it, and it
+  // is where a failed app lands you. Defaults to "/app.js" when null.
+  const char *launcher = "/app.js";
+
+  // Where the corner button sends an app that wants a network it hasn't got.
+  // Null disables that offer, which on a pinned board leaves no route to setup.
+  const char *wifi_app = nullptr;
+
+  // A button that opens the launcher on a long-press (>= 700 ms), active low.
+  // This is the escape hatch that survives an app covering the corner button, a
+  // pin removing it, or the touch panel failing outright. -1 for a board with no
+  // spare button, which gives up that guarantee.
+  int home_button_pin = -1;
+};
+
+// Mounts the supervisor and boots the first script: the pinned app if one is
+// set, else the launcher, else the built-in fallback screen. Call once from
+// setup(), after LVGL and storage are up, since it creates LVGL objects and
+// evaluates a script immediately.
+void jsvm_app_begin(const JsvmAppConfig &cfg);
+
+// Pumps the supervisor: the long-press check, the serial protocol, the promise
+// queue, the corner button, and any pending app switch. Call once per loop(),
+// after lv_timer_handler(). Replaces calling jsvm_pump() yourself.
+void jsvm_app_service();
+
+// Queues an app switch, performed on the next jsvm_app_service(). Switching is
+// never immediate: the caller is usually inside an LVGL callback or the REPL,
+// and tearing the context down there would free the code that is running.
+void jsvm_app_request(const char *path);
+
+// The script currently running, or null when only the built-in fallback is up.
+const char *jsvm_app_current();
+
 // ---- host hooks: implement these in your sketch -----------------------------
 // These are what sys.fps(), sys.backlight() and sys.battery() call.
 

@@ -15,11 +15,12 @@ btn.on("click", () => console.log("tapped"));
 
 | | |
 |---|---|
-| Widgets | `lv.obj`, `lv.button`, `lv.label`, `lv.slider`, `lv.switch`, `lv.arc`, `lv.list`, `lv.chart`, `lv.tabview`, plus `lv.screen()` for the root |
+| Widgets | `lv.obj`, `lv.button`, `lv.label`, `lv.slider`, `lv.switch`, `lv.arc`, `lv.list`, `lv.chart`, `lv.tabview`, `lv.textarea`, `lv.keyboard`, plus `lv.screen()` for the root |
 | Props | size (px, `"50%"`, `"content"`), `align`/`x`/`y`, `flex`/`flexAlign`, text, colors, font, `range`, `value`, padding, borders, and a few per-widget extras |
-| Methods | `.set()`, `.on()` (click, change, press, pressing), `.value()`, `.bounds()`, `.clean()`, plus `.add()`, `.addTab()`, `.push()` on the widgets that take them |
+| Methods | `.set()`, `.on()` (click, change, press, pressing, longpress), `.value()`, `.bounds()`, `.clean()`, plus `.add()`, `.addTab()`, `.push()`, `.target()` on the widgets that take them |
 | Timers | `lv.timer(ms, fn)`, returning a handle with `.stop()` |
-| Device | `sys` (heap, battery, uptime, fps, backlight, chip info), `wifi.scan()`, `console.log` |
+| Device | `sys` (heap, battery, uptime, fps, backlight, chip info, launch/pin), `wifi` (status, save, scan), `console.log` |
+| Storage & network | `fs` (read, write, append, list, mkdir…) and `fetch(url)` returning a `Promise` |
 | Language | full ES2023 including closures, `JSON`, `Promise`, `async`/`await` |
 
 Full reference with every prop and its accepted values: [`docs/binding-api.md`](../../docs/binding-api.md).
@@ -28,11 +29,11 @@ Anything not in that list has to be added to the binding layer in C before a scr
 
 ## What's in src/
 
-`jsvm_core.cpp` is the VM: QuickJS lifecycle, the PSRAM allocator, JSValue ownership, and teardown order. `bindings_lv.cpp`, `bindings_sys.cpp`, and `bindings_wifi.cpp` are one global each. `js_bindings.h` is the whole public surface; `jsvm_internal.h` is what the core shares with the modules.
+`jsvm_core.cpp` is the VM: QuickJS lifecycle, the PSRAM allocator, JSValue ownership, and teardown order. `bindings_lv.cpp`, `bindings_sys.cpp`, `bindings_fs.cpp`, and `bindings_wifi.cpp` are one global each. `jsvm_app.cpp` is the optional supervisor described under [Using it](#using-it). `js_bindings.h` is the whole public surface; `jsvm_internal.h` is what the core shares with the modules.
 
 The invariant that keeps them separable: a binding module never stores a `JSValue`. Callbacks are handed to the core, which owns their lifetime. If you add a module, follow that.
 
-`sys` and `wifi` are optional — build with `-DJSVM_WITH_SYS=0` or `-DJSVM_WITH_WIFI=0` (in your sketch's `build_opt.h`) to leave either out entirely, which also drops `WiFi.h` from the firmware. `lv` and `console` are core and always present.
+`sys`, `fs` and `wifi` are optional — build with `-DJSVM_WITH_SYS=0`, `-DJSVM_WITH_FS=0` or `-DJSVM_WITH_WIFI=0` (in your sketch's `build_opt.h`) to leave any of them out entirely, which for wifi also drops `WiFi.h` from the firmware. `lv` and `console` are core and always present.
 
 ## Requirements
 
@@ -68,7 +69,30 @@ void loop() {
 }
 ```
 
-Loading that script from an SD card or flash partition, hot-reloading it on a button press, and exposing a serial REPL are all host policy and deliberately live outside this library. [`../boards/waveshare-s3-touch-147/`](../boards/waveshare-s3-touch-147/README.md) is a complete worked example of all three.
+That is the low-level interface, and enough if your firmware ships one fixed script.
+
+For a board that loads scripts off storage, the library also provides a supervisor: the boot chain (pinned app → SD `/app.js` → flash `/app.js` → a built-in fallback screen), a corner button on `lv_layer_top()` that no script can delete or cover, a long-press escape hatch, and a serial protocol for uploading a script and reloading it. None of that depends on the board, so it lives here rather than being copied into each sketch:
+
+```cpp
+void setup() {
+  // ... display init, then mount your filesystems ...
+  JsvmAppConfig cfg;
+  cfg.sd = &SD_MMC;                 // either may be null
+  cfg.flash = &FFat;
+  cfg.launcher = "/app.js";
+  cfg.wifi_app = "/apps/wifi.js";   // null to not offer network setup
+  cfg.home_button_pin = 0;          // active low; -1 for none
+  jsvm_app_begin(cfg);              // boots the first script
+}
+
+void loop() {
+  lv_timer_handler();
+  jsvm_app_service();               // replaces jsvm_pump()
+  delay(5);
+}
+```
+
+It is opt-in, and it has no privileged access: it is written against exactly the interface shown above it. Skip `jsvm_app_begin()` and you keep the low-level path. [`../boards/waveshare-s3-touch-147/`](../boards/waveshare-s3-touch-147/README.md) is a complete worked example, and 189 lines because of this split.
 
 ## The rule that matters
 

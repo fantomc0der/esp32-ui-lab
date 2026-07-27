@@ -8,7 +8,9 @@ A scriptable firmware platform: the compiled part is flashed once and rarely cha
 
 The first is **firmware against apps**. `firmware/` is everything that gets flashed; `app/` is data it reads. Changing an app means saving a file and long-pressing a button, about a second, with no compiler involved.
 
-The second is **platform against board**. Inside `firmware/`, the two Arduino libraries (`quickjs-ng/`, `lvgl-js-bindings/`) contain no pin numbers, no resolution, and no panel name; `boards/<name>/` contains nothing but those. A new board is a pinout, a display bring-up, and three host hooks.
+The second is **platform against board**. Inside `firmware/`, the two Arduino libraries (`quickjs-ng/`, `lvgl-js-bindings/`) contain no pin numbers, no resolution, and no panel name; `boards/<name>/` contains nothing but those. A new board is a pinout, a display bring-up, three host hooks, and a config struct: 189 lines here.
+
+That seam is drawn at hardware, not at "compiled versus scripted". Which file boots, what happens when it throws, the button that gets you out of an app, the serial upload protocol: all of that is compiled C, and none of it depends on the panel, so it sits on the library side in `jsvm_app.cpp`. It was in the sketch until a port attempt had to copy it and the two copies diverged.
 
 ```
                         app/  app.js, apps/*.js        data on SD or FATFS
@@ -41,11 +43,11 @@ One process-level rule holds everywhere: **a single task does everything.** `loo
 
 ## The platform
 
-Two Arduino libraries hold the reusable part: `quickjs-ng/` (the vendored engine) and `lvgl-js-bindings/` (the LVGL bindings). `boards/waveshare-s3-touch-147/` is the sketch that owns the hardware, and `app/app.js` is the launcher that ships to the board.
+Two Arduino libraries hold the reusable part: `quickjs-ng/` (the vendored engine) and `lvgl-js-bindings/` (the LVGL bindings plus the app supervisor). `boards/waveshare-s3-touch-147/` is the sketch that owns the hardware, and `app/app.js` is the launcher that ships to the board.
 
 The board sketch is the source of hardware truth. Its glue files (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) started as copies of the C dashboard's, and hardware fixes now land here; the frozen dashboard is not updated to match. One divergence is deliberate rather than drift: the board sketch's `lv_conf.h` additionally enables Montserrat 28 and 40, because scripts can select those sizes and the C dashboard has no need of them.
 
-Everything above the hardware, meaning the VM, the LVGL bindings, the ownership machinery, the script loader, the reload path, and the serial protocol, is documented in [`runtime-architecture.md`](runtime-architecture.md). What a port to another board actually has to supply is in [`portability.md`](portability.md).
+Everything above the hardware, meaning the VM, the LVGL bindings, the ownership machinery, the boot chain, the reload path, and the serial protocol, is documented in [`runtime-architecture.md`](runtime-architecture.md). What a port to another board actually has to supply is in [`portability.md`](portability.md).
 
 ## The frozen C dashboard
 

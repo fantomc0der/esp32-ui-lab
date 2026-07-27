@@ -26,9 +26,10 @@ Inside the binding library, one file owns correctness and the rest own vocabular
 
 | File | Owns |
 |---|---|
-| `js_bindings.h` | the entire public surface: start, stop, eval a line, pump jobs, plus the three host hooks |
+| `js_bindings.h` | the entire public surface: start, stop, eval a line, pump jobs, the supervisor, plus the three host hooks |
 | `jsvm_internal.h` | what the core shares with the modules, and nothing more |
 | `jsvm_core.cpp` | QuickJS lifecycle, the PSRAM allocator, JSValue ownership, the trampolines, teardown order, `console` |
+| `jsvm_app.cpp` | the supervisor: the boot chain, the corner button, the serial protocol, the built-in fallback script |
 | `bindings_lv.cpp` | the `lv` global: widget constructors, props, widget methods |
 | `bindings_sys.cpp` | the `sys` global |
 | `bindings_wifi.cpp` | the `wifi` global |
@@ -39,9 +40,11 @@ The rule that keeps the split honest: **a module never stores a `JSValue`.** Any
 
 Per-widget files were considered and rejected. `lv_binding_js` needs them because a React reconciler wants per-component prop diffing; here all nine widgets share one `apply_props`, so a widget is an enum value, a `switch` case, and a table row. Nine files of ten lines would be more structure describing less code.
 
-In the sketch, the `.ino` owns the hardware and the process lifecycle: display bring-up, LVGL wiring, the script loader, the serial protocol, and the main loop. `js_fallback.h` holds the script baked into flash for when no `app.js` is found. The hardware headers (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) started as copies of the frozen C dashboard's, and are now maintained here.
+`jsvm_app.cpp` is a second boundary inside the library, and a more recent one. It holds everything about *running* scripts that turned out not to depend on the board: which file boots and in what order, what happens when one throws, the corner button, the long-press, and the serial protocol. That code lived in the sketch until it became clear a second board would have to copy it verbatim and then drift, which is the specific failure a closed port branch demonstrated. It is optional: a sketch with its own answers can drive `jsvm_start()`/`jsvm_stop()`/`jsvm_pump()` directly and never call `jsvm_app_begin()`.
 
-Note the direction of the dependency. The bindings never reach into the sketch's globals; where they need something only the host knows, the host supplies it through `jsvm_host_fps()`, `jsvm_host_backlight()`, and `jsvm_host_battery()`, declared in the library header and defined in the `.ino`. Those three functions are the entire porting contract: bring LVGL up however a different board requires, implement them, and the binding library compiles unchanged.
+The sketch is now hardware only: display bring-up, touch, LVGL wiring, storage mounting, the three host hooks, and a `loop()` that calls `lv_timer_handler()` then `jsvm_app_service()`. That is 189 lines, of which the policy extraction removed 388. The hardware headers (`board_pins.h`, `jd9853_panel.h`, `axs5106l_touch.*`, `lv_conf.h`) started as copies of the frozen C dashboard's, and are now maintained here.
+
+Note the direction of the dependency. The bindings never reach into the sketch's globals; where they need something only the host knows, the host supplies it through `jsvm_host_fps()`, `jsvm_host_backlight()`, and `jsvm_host_battery()`, declared in the library header and defined in the `.ino`. Those three functions plus a `JsvmAppConfig` are the entire porting contract: bring LVGL up however a different board requires, implement them, and the binding library compiles unchanged.
 
 One build subtlety worth knowing: the sketch folder is on the include path for library compilation units (verified in the build's `-I` flags), which is how the sketch-local `lv_conf.h` governs LVGL *and* the binding library. Both see the same LVGL configuration, so there is no risk of the two disagreeing about struct layouts.
 
@@ -58,28 +61,37 @@ The rule is also the main constraint on future work. Every asynchronous network 
 ## Boot and lifecycle
 
 ```
-setup()
+setup()                              the sketch: hardware only
   backlight off ─ panel reset ─ gfx->begin ─ jd9853_init ─ rotation
   Wire + touch_begin
   WiFi.mode(STA)                     radio up, not connected (scan needs this)
   lv_init, tick cb, draw buffers, display, pointer indev
-  runApp() ─────────────► first script starts here
+  SD_MMC + FFat mount
+  jsvm_app_begin(cfg) ──────────────► the library takes over
+    corner button, wifi autoconnect
+    runApp() ───────────────────────► first script starts here
   backlight on
 
 loop()  (forever)
   lv_timer_handler()                 renders, fires lv_timers → JS callbacks
   fps accounting                     flush_count over a 1 s window
-  BOOT long-press check              ≥ 700 ms → runApp()
-  pollSerialRepl()                   host commands, or eval one line
-  jsvm_pump()                        drain promise jobs
+  jsvm_app_service()
+    long-press check                 ≥ 700 ms → runApp()
+    pollSerialRepl()                 host commands, or eval one line
+    jsvm_pump()                      drain promise jobs
+    updateCornerButton()
+    pending switch                   sys.launch() / corner / serial / button
   delay(idle_ms)                     LVGL's own sleep hint, capped at 16 ms
 ```
 
 `runApp()` is the only entry point that starts a script, and it is deliberately re-runnable at any time. It calls `jsvm_stop()` first (safe when nothing is running), searches storage in a fixed order, then starts the VM:
 
-1. `sd:/app.js`, with the card mounted fresh on every attempt so a card swapped while powered is seen, then unmounted immediately.
-2. `ffat:/app.js` on the 9.9 MB FATFS partition, formatting it on first use.
-3. `kFallbackScript` compiled into flash.
+1. the pinned script, if one is set, which replaces the launcher rather than being searched for alongside it.
+2. `/app.js` on the SD card.
+3. `/app.js` on the 9.9 MB FATFS partition.
+4. `kFallbackScript`, compiled into `jsvm_app.cpp`.
+
+Both filesystems are mounted once by the sketch and handed to `jsvm_app_begin()`, which is what lets scripts have a real `fs` API. The tradeoff is hot-swapping: changing cards needs a reset.
 
 The script source is read into a PSRAM buffer, evaluated, and freed; QuickJS copies what it needs during compilation. A script that throws during its top-level evaluation is reported with its stack, torn down, and replaced by the fallback screen, so a syntax error in `app.js` cannot leave the board dark or wedged.
 
@@ -172,18 +184,18 @@ The bottom-right corner is one slot holding at most one control, and `updateCorn
 
 | State | Shown when | Goes to |
 | --- | --- | --- |
-| Wi-Fi | `jsvm_network_setup_needed()`, and the Wi-Fi app is not already what's running | `kWifiApp` |
+| Wi-Fi | `jsvm_network_setup_needed()`, and the Wi-Fi app is not already what's running | `cfg.wifi_app` |
 | Back | a pin is set and something other than the pinned app is running | the pinned app |
-| Home | no pin, and something other than the launcher is running | `kLauncher` |
+| Home | no pin, and something other than the launcher is running | `cfg.launcher` |
 | nothing | you are already where the button would take you | — |
 
 Setup outranks navigation because it is the more actionable of the two and the harder one to reach by other means: a pinned board draws no back button while its app is running, so without the Wi-Fi state that corner is empty and the only route to network setup is a BOOT long-press nobody discovers. Ranking it above Home costs an unpinned user one extra tap through the launcher, which is a fair trade for a rule that reads the same on both kinds of board.
 
 ## Pinning one app
 
-A pin is a single NVS string, written by `sys.pin()` or the host's `pin` command and read back by `jsvm_pinned_app()`. The binding library only remembers the preference; what to do about it is host policy, which keeps the split intact — the library still knows nothing about launchers or corner buttons. The board sketch reads it in two places: `setup()` boots the pinned script instead of `kLauncher`, and `updateCornerButton()` treats a pin as "the launcher is not part of this product", which both hides the button while the pinned app is running and redefines the way back as the pinned app rather than the launcher. The value it reads is cached in RAM, so polling it every `loop()` does not hit NVS.
+A pin is a single NVS string, written by `sys.pin()` or the `pin` serial command and read back by `jsvm_pinned_app()`. `bindings_sys.cpp` only remembers the preference; acting on it is the supervisor's job, and the separation still earns its keep — the `sys` module knows nothing about launchers or corner buttons, so a host that ignores the supervisor entirely can honour a pin however it likes. `jsvm_app.cpp` reads it in two places: `jsvm_app_begin()` boots the pinned script instead of `cfg.launcher`, and `updateCornerButton()` treats a pin as "the launcher is not part of this product", which both hides the button while the pinned app is running and redefines the way back as the pinned app rather than the launcher. The value is cached in RAM, so polling it every pass does not hit NVS.
 
-Two properties are worth preserving if this changes. A pinned script that fails to load still falls back to the launcher, so a bad pin cannot brick the panel. And the BOOT long-press deliberately ignores the pin: it is the only route back to the launcher once the corner button no longer offers one, and therefore the only way to unpin a board with nothing plugged into it.
+Two properties are worth preserving if this changes. A pinned script that fails to load still falls back to the launcher, so a bad pin cannot brick the panel. And the long-press deliberately ignores the pin: it is the only route back to the launcher once the corner button no longer offers one, and therefore the only way to unpin a board with nothing plugged into it. A board that sets `cfg.home_button_pin = -1` gives that guarantee up, which is a real choice rather than an omission.
 
 ## Knowing an app wants the network
 

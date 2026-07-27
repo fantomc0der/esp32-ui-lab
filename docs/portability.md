@@ -6,17 +6,19 @@ The counterpart to [`experiments/c-dashboard/portability.md`](experiments/c-dash
 
 | Component | Lines | Board-specific? |
 |---|---|---|
-| `lvgl-js-bindings/src/` | 2127 | **0%** — knows LVGL, QuickJS and the Arduino ESP32 core. No pins, no panel, no resolution. The `sys` and `wifi` modules compile out via `-DJSVM_WITH_SYS=0` / `-DJSVM_WITH_WIFI=0`. |
+| `lvgl-js-bindings/src/` | 2621 | **0%** — knows LVGL, QuickJS and the Arduino ESP32 core. No pins, no panel, no resolution. The `sys` and `wifi` modules compile out via `-DJSVM_WITH_SYS=0` / `-DJSVM_WITH_WIFI=0`, and the supervisor (`jsvm_app.cpp`, 442 lines) is optional. |
 | `quickjs-ng/src/` | vendored | **0%** — plain C, five Xtensa type patches (see [engine-notes.md](engine-notes.md)). |
-| `boards/<name>/<name>.ino` | 577 | **~35%** — display construction, pin use, SD_MMC wiring, and the three host hooks. The loader, reload, and serial protocol are policy you'd likely keep. |
+| `boards/<name>/<name>.ino` | 189 | **~95%** — display construction, pin use, SD_MMC wiring, the three host hooks, and a config struct. Almost nothing here is reusable, which is the point: everything that was got moved. |
 | `boards/<name>/` hardware headers | — | **100%** — this is the board, by definition; the frozen C dashboard's [portability doc](experiments/c-dashboard/portability.md) breaks the same files down line by line. |
 | `app/app.js` and `app/apps/` | 571 | **~85%** — geometry is derived from `lv.size()`, percentages and alignment rather than written for 320×172, so the apps fill a different panel instead of sitting in a corner of it. The residual 15% is the pixel constants that are tuned to font metrics (a header's height, the gap between two lines), and they are load-bearing: a panel small enough to crowd them still needs a look. |
 
 ## Hard requirements
 
-**PSRAM, effectively mandatory.** The allocator passes `MALLOC_CAP_SPIRAM` unconditionally, so on a chip without PSRAM the runtime fails to start. Falling back to internal RAM is a one-line change, but the ESP32-S3 has only ~300 KB of internal SRAM with LVGL's draw buffers already competing for it, so a JS heap there would be cramped. Treat PSRAM as required.
+**PSRAM, effectively mandatory.** `MALLOC_CAP_SPIRAM` is hardcoded in 5 files (`jsvm_core.cpp`, `jsvm_app.cpp`, `bindings_fs.cpp`, `bindings_sys.cpp`, `bindings_wifi.cpp`), so on a chip without PSRAM the runtime fails to start. This is the one real portability coupling in the library, and it is left as a known limitation rather than fixed because every board on the list has PSRAM. Making it a compile-time choice is a small change: one `BOARD_JS_HEAP_CAPS` macro, five call sites.
 
-This is what excludes the **ESP32-C3 and C6** (no PSRAM at all). It includes the **S3**, the **S2 with PSRAM**, and the classic **WROVER** modules.
+This excludes the **ESP32-C3 and C6** (no PSRAM at all) as written. It includes the **S3**, the **S2 with PSRAM**, and the classic **WROVER** modules.
+
+**If you do try a PSRAM-less chip, the answer is `MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA`, not `MALLOC_CAP_INTERNAL`.** This was proven on a classic ESP32 (an ESP32-2432S028R), and the failure mode is worth writing down because it looks like the engine is incompatible with the chip: with plain `INTERNAL`, `JS_NewRuntime2()` panics with `LoadStoreError` on its first sub-word write. The cause is that `INTERNAL` alone can return IRAM, which permits only aligned 32-bit access, and QuickJS writes bytes and shorts. Adding `DMA` restricts the allocation to DRAM and it runs. Two numbers from that experiment: the engine costs about 78.8 kB of internal RAM at rest there, and `heap_caps_get_free_size(MALLOC_CAP_INTERNAL)` overstates what is actually usable by roughly 58 kB, because it counts IRAM the allocator cannot hand to a byte-writing caller. Budget against the `INTERNAL|DMA` figure instead.
 
 **Flash: 4 MB realistically, 8–16 MB comfortably.** The engine alone is ~429 KB, plus LVGL, plus the Arduino core and WiFi stack. This project's firmware is 1.79 MB. The default 4 MB partition scheme gives roughly 1.2 MB of app space, which is not enough, so a custom partition scheme is part of any port.
 
@@ -39,9 +41,9 @@ The one thing that genuinely does not scale is text: fonts are fixed-size bitmap
 | Target | Work required |
 |---|---|
 | Same board, new UI | Edit `app.js`. No firmware change at all. |
-| Another ESP32-S3 board with a display | New sketch: LVGL display/indev setup for that panel, plus the three host hooks. Both libraries unchanged, and the shipped apps adapt to the new resolution without editing. Expect an afternoon. |
+| Another ESP32-S3 board with a display | New sketch: LVGL display/indev setup for that panel, the three host hooks, and a `JsvmAppConfig`. Both libraries unchanged, no policy to copy, and the shipped apps adapt to the new resolution without editing. Around 190 lines, most of it the display stack. |
 | ESP32-S2 or WROVER | As above, plus check flash size and partition scheme. `wifi.scan()` and `sys.info()` still work. |
-| ESP32-C3 / C6 (no PSRAM) | Not supported as written. Requires reworking the allocator to internal RAM and accepting a small heap; unproven. |
+| ESP32-C3 / C6 (no PSRAM) | Not supported as written, but the engine does run without PSRAM: proven on a classic ESP32 once the heap caps became `INTERNAL\|DMA` (see above). Costs ~79 kB of internal RAM and leaves a heap small enough that script size starts to matter. |
 | Non-ESP32 (RP2040, STM32…) | The binding layer's *design* ports, but `esp_heap_caps.h`, `WiFi.h`, and `ESP.*` do not. Expect to replace the allocator and drop or reimplement `wifi.scan()` and `sys.info()`. |
 
 ## The porting contract
@@ -54,4 +56,23 @@ void     jsvm_host_backlight(uint8_t pct); // 0-100, already clamped
 float    jsvm_host_battery();              // volts, or NAN for "unavailable"
 ```
 
-Return `0` and `NAN` for anything a board lacks, and the corresponding script calls degrade to zero and `null` rather than failing. Bring LVGL up however the board requires, implement those three, call `jsvm_start()`, and pump `jsvm_pump()` from `loop()`. That is the whole integration.
+Return `0` and `NAN` for anything a board lacks, and the corresponding script calls degrade to zero and `null` rather than failing.
+
+Everything in the other direction, the parts about *running* scripts, is a struct:
+
+```cpp
+JsvmAppConfig cfg;
+cfg.sd = &SD_MMC;                 // or null
+cfg.flash = &FFat;                // or null
+cfg.launcher = "/app.js";
+cfg.wifi_app = "/apps/wifi.js";   // null to not offer setup
+cfg.home_button_pin = 0;          // active low, long-press opens the launcher; -1 for none
+jsvm_app_begin(cfg);              // in setup(), after LVGL and storage
+jsvm_app_service();               // in loop(), after lv_timer_handler()
+```
+
+So a whole board sketch is: bring LVGL up however the hardware requires, implement three hooks, fill in that struct, and call two functions. This board's is 189 lines, and roughly 70 of them are the display stack.
+
+The supervisor is opt-in. A product that wants its own boot rules, no corner button, or a different serial protocol skips `jsvm_app_begin()` entirely and drives `jsvm_start()`, `jsvm_stop()` and `jsvm_pump()` itself; that is the interface the supervisor is written against, with no privileged access.
+
+Worth knowing why it exists at all, since it reads like premature generality: it was in the sketch first. A port attempt to a different board copied those 388 lines, both copies then acquired separate bugs, and the port was abandoned partly because of the divergence. Policy that gets copied per board is policy that drifts, so it lives on the library side of the seam.

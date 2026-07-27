@@ -25,7 +25,25 @@ To ship one app rather than a menu, pin it: long-press its row in the launcher (
 Two ways to ship a script:
 
 - **SD card:** copy [`lang-js/app/app.js`](../../lang-js/app/app.js) to the root of a FAT-formatted microSD, insert it, long-press **BOOT** (≥ 700 ms). The card is re-mounted on every reload, so it can be swapped while the board is powered, and it always wins over the flash partition.
-- **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. js-host writes the script to the internal FATFS partition and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
+- **Over serial:** send the line `app-begin`, then the script's lines, then `app-end`. js-host writes the script and reloads immediately — no card handling, works from any terminal or script talking to the COM port at 115200.
+
+[`lang-js/push.ps1`](../../lang-js/push.ps1) drives the serial route, which is worth using rather than pasting by hand:
+
+```powershell
+cd lang-js
+.\push.ps1 app\apps\weather.js         # -> /apps/weather.js, then reloads it
+.\push.ps1 app\app.js                  # -> /app.js
+.\push.ps1 app\selftest.js -Dest /app.js
+```
+
+The destination mirrors the repo layout under `app\`, because that layout *is* the card layout. Two failure modes are the reason the script exists, and both leave a file that still parses, so the board reloads without complaint and the damage only shows on the panel:
+
+- **Encoding.** A terminal (or .NET's `SerialPort`, which defaults to US-ASCII) that is not sending UTF-8 rewrites every non-ASCII character as `?`. In `weather.js` that is the degree sign, and the symptom is a temperature reading `23?` on the panel.
+- **Pacing.** The host reads serial one character at a time from `loop()`, so a file pushed as fast as the port accepts it loses bursts out of the middle.
+
+`push.ps1` forces UTF-8, paces the lines, and then reads the file back off the board and compares a position-sensitive checksum against the local copy, so a mangled push fails loudly instead of quietly. Raise `-LineDelayMs` if a mismatch ever repeats.
+
+Note that the stored copy always ends with exactly one more newline than the file on disk: the protocol writes `line + "\n"` for every line, including the last. That is expected and is what the checksum accounts for.
 
 ## Checking the binding layer
 

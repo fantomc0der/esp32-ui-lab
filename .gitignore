@@ -1,3 +1,7 @@
+# LLM workspace
+.temp/
+
+# Claude Code
 .omc/
 
 # arduino-cli output when a build is pointed somewhere with --build-path, which

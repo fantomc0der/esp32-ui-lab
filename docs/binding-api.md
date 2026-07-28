@@ -77,7 +77,7 @@ lv.label(bar, { text: "left" });
 lv.label(bar, { text: "right" });
 ```
 
-**Alignment, for anything that should hang off an edge or the middle.** An element aligned `bottom-mid` stays at the bottom of any panel with no size involved, so the extra space on a larger display goes into the margin instead of into a gap. [`apps/weather.js`](../app/apps/weather.js) is laid out entirely this way and reads no dimensions at all.
+**Alignment, for anything that should hang off an edge or the middle.** An element aligned `bottom-mid` stays at the bottom of any panel with no size involved, so the extra space on a larger display goes into the margin instead of into a gap. The weather app is laid out entirely this way and reads no dimensions at all ([`app/src/weather.jsx`](../app/src/weather.jsx), or [its pre-port original](../tools/fixtures/weather-imperative.js) for the same layout in plain `lv` calls).
 
 **`lv.size()`, for the decisions a percentage cannot express.** It returns `{w, h}` of the display. Read it once at startup, since a panel does not resize:
 
@@ -97,7 +97,7 @@ The pattern worth copying from [`app/app.js`](../app/app.js) and [`apps/vitals.j
 Two things that stay in pixels no matter what:
 
 - **Fonts do not scale.** The sizes are fixed bitmaps compiled into the firmware, so text is the same height on a 172px panel and a 320px one. Anything sized to fit text is therefore a pixel constant, and a percentage there will clip on a small panel or float in space on a large one.
-- **The firmware's corner button is 34px in the bottom-right** of every screen (see [Apps and getting back](#apps-and-getting-back)). A control placed under it is unreachable, so leave ~40px clear there — `apps/wifi.js` sizes its keyboard `S.w - CORNER` for exactly this reason.
+- **The firmware's corner button is 34px in the bottom-right** of every screen (see [Apps and getting back](#apps-and-getting-back)). A control placed under it is unreachable, so leave ~40px clear there — the wifi app sizes its keyboard `S.w - CORNER` for exactly this reason.
 
 `selftest.js` deliberately keeps fixed sizes throughout: its geometry is test fixtures with expected values, not a layout.
 
@@ -203,7 +203,7 @@ Over serial, `pin [path]` and `unpin` do the same thing, with one difference wor
 
 A pin that names a missing or broken script costs you the appliance behaviour, not the board: the load fails, and the firmware falls back to the launcher exactly as it does for any other app. A pin that no `/apps` row accounts for still gets a row of its own there, marked `(missing)` when the file is genuinely gone, because a pin you cannot see is a pin you cannot release without a serial cable.
 
-One thing to know when building multi-screen apps: rebuilding the screen from inside a click handler deletes the widget LVGL is currently dispatching to. Defer it by a tick instead, which is what [`apps/wifi.js`](../app/apps/wifi.js) does:
+One thing to know when building multi-screen apps: rebuilding the screen from inside a click handler deletes the widget LVGL is currently dispatching to. Defer it by a tick instead:
 
 ```js
 const next = fn => { const t = lv.timer(20, () => { t.stop(); fn(); }); };

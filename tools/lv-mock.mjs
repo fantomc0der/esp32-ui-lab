@@ -20,18 +20,22 @@
 // A memory-backed `fs`, enough for an app that keeps a little state. Same
 // contract as bindings_fs.cpp: read() gives the text or null, write() gives a
 // boolean, and available() is how a script finds out whether to bother.
-export function makeFs(files = {}) {
+export function makeFs(files = {}, dirs = {}) {
   return {
     files,
+    dirs,
     available: () => true,
     read: p => (p in files ? files[p] : null),
     write: (p, text) => { files[p] = String(text); return true; },
     append: (p, text) => { files[p] = (files[p] || "") + String(text); return true; },
     exists: p => p in files,
     remove: p => { delete files[p]; return true; },
-    mkdir: () => true,
-    isDir: () => false,
-    list: () => null,
+    mkdir: p => { dirs[p] = dirs[p] || []; return true; },
+    isDir: p => p in dirs,
+    // Bare names, and null for anything that is not a directory — the same
+    // shape bindings_fs.cpp returns, because a script that checks for null is
+    // relying on it.
+    list: p => (p in dirs ? dirs[p].slice() : null),
   };
 }
 

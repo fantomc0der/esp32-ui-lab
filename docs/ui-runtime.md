@@ -39,13 +39,13 @@ node tools/build-app.mjs counter     # app/src/counter.jsx -> app/apps/counter.j
 
 ## What it buys
 
-**A screen you can read.** The layout is one expression rather than a sequence of `lv.*` calls plus the bookkeeping to update them. Compare [`apps/vitals.js`](../app/apps/vitals.js), which keeps eight widget handles alive in module scope so a timer can write to them, against a component that just returns a different tree.
+**A screen you can read.** The layout is one expression rather than a sequence of `lv.*` calls plus the bookkeeping to update them. Compare [the pre-port `vitals`](../tools/fixtures/vitals-imperative.js), which keeps eight widget handles alive in module scope so a timer can write to them, against a component that just returns a different tree.
 
 **Updates you don't have to write.** `.set()` calls, `.clean()`, which handle to keep, which to throw away: all of that becomes the reconciler's problem. It sends only the props that changed — a label whose colour, font and alignment are written on every render still costs exactly one `lv_label_set_text`.
 
 **Reordering without rebuilding.** Give a list's children `key` props and a reshuffle moves the existing widgets (`lv_obj_move_to_index`) instead of deleting and rebuilding them. Rebuilding is what an imperative version does, because working out the minimal set of moves by hand is not worth it for one screen.
 
-**The click-handler hazard, gone.** [`binding-api.md`](binding-api.md) warns that rebuilding the screen from inside a click handler deletes the widget LVGL is dispatching to, and tells you to defer by a tick — the `lv.timer(20, ...)` dance in [`apps/wifi.js`](../app/apps/wifi.js). Under the runtime, a state write never renders immediately. It marks the component dirty and returns; the render happens in a promise microtask, which the host drains from `loop()` *after* `lv_timer_handler()` has returned. There is nothing to defer, because nothing was ever going to run during dispatch.
+**The click-handler hazard, gone.** [`binding-api.md`](binding-api.md) warns that rebuilding the screen from inside a click handler deletes the widget LVGL is dispatching to, and tells you to defer by a tick — the `lv.timer(20, ...)` dance that [the pre-port `wifi`](../tools/fixtures/wifi-imperative.js) needed in six places. Under the runtime, a state write never renders immediately. It marks the component dirty and returns; the render happens in a promise microtask, which the host drains from `loop()` *after* `lv_timer_handler()` has returned. There is nothing to defer, because nothing was ever going to run during dispatch.
 
 ## What it costs
 
@@ -154,4 +154,21 @@ This does not replace [`app/selftest.js`](../app/selftest.js), which is still th
 
 ## When not to use it
 
-A screen built once and never updated gains nothing from a reconciler, and pays 8 KB and a build step for it. [`apps/weather.js`](../app/apps/weather.js) is that shape. So is anything driving a widget imperatively at speed — pushing chart points, following a drag — where the tree is not what is changing. The imperative API is not deprecated, is not going anywhere, and remains what [`binding-api.md`](binding-api.md) documents.
+A screen built once and never updated gains nothing from a reconciler, and pays 8 KB and a build step for it. [`app/selftest.js`](../app/selftest.js) is that shape, and stays imperative for a second reason: it is the test of the binding surface, so putting a layer between it and the bindings would weaken exactly what it checks.
+
+Parts of an app can opt out too, and two do. The touch dot in the dashboard follows a finger, which through the reconciler would mean a render per pointer move to move one widget; it uses a `ref` and two `.set()` calls instead. The chart is fed with `chart.push(n)`, because appending a sample is not a change to the tree. Both sit inside components that are otherwise declarative, which is the intended way to use the escape hatch rather than an admission against it.
+
+The imperative API is not deprecated, is not going anywhere, and remains what [`binding-api.md`](binding-api.md) documents. Every app shipped in `app/apps/` is now a port, but each one's pre-port original is frozen in [`tools/fixtures/`](../tools/fixtures/) — worth reading beside the `.jsx` if you want to judge the trade for yourself, since the parity test guarantees they are the same screen.
+
+### What a port actually changed
+
+Ported from imperative `lv` calls, checked by [`tools/test-parity.mjs`](../tools/test-parity.mjs):
+
+| App | What the port removed |
+|---|---|
+| [`vitals.jsx`](../app/src/vitals.jsx) | eight module-scope widget handles a timer wrote through |
+| [`weather.jsx`](../app/src/weather.jsx) | a hand-written `render(data, source)`, and a retry timer created and nulled in three places — now `useInterval(update, online ? null : RETRY_MS)` |
+| [`app.jsx`](../app/src/app.jsx) | "rows are repainted, never rebuilt", a rule the keyed diff now keeps structurally |
+| [`wifi.jsx`](../app/src/wifi.jsx) | `next()` (the `lv.timer(20)` deferral) in six places, `reset()`, and the `screenTimer` handle nulled in three |
+
+One thing a port does *not* remove: the panel. Fonts still do not scale, the corner button still owns its 40 pixels, and every layout decision in [binding-api.md](binding-api.md#writing-for-more-than-one-screen) still applies.

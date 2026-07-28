@@ -59,14 +59,16 @@ Tag names are the `lv` maker names, so there is no second vocabulary and nothing
 
 | Tag | |
 |---|---|
-| `<obj>` `<button>` `<label>` `<slider>` `<switch>` `<arc>` `<list>` `<chart>` `<tabview>` `<textarea>` `<keyboard>` | the eleven makers |
+| `<obj>` `<button>` `<label>` `<slider>` `<switch>` `<arc>` `<list>` `<chart>` `<tabview>` `<textarea>` `<keyboard>` `<bar>` `<checkbox>` `<roller>` `<dropdown>` `<spinner>` `<led>` | the seventeen makers |
 | `<row>` | a list row. Only valid directly inside a `<list>`, because the widget comes from `list.add(text)` rather than from a maker |
 | `<tab name="…">` | a tabview tab, and likewise only inside a `<tabview>`. Its children go into the content container `addTab()` returns |
 | `<>…</>` | a fragment: several elements where one is expected, with no container widget |
 
 A capitalised name is a component, per JSX's own rule: `<Header />` calls the function `Header` in scope with the props as its argument.
 
-Text children set the `text` prop on the tags that have one (`<label>`, `<button>`, `<row>`), so `<button>Scan</button>` and `<button text="Scan" />` are the same thing. A string anywhere else becomes a `<label>`, which is what makes `<obj>{message}</obj>` render.
+Text children set the `text` prop on the tags that have one (`<label>`, `<button>`, `<row>`, `<checkbox>`), so `<button>Scan</button>` and `<button text="Scan" />` are the same thing. A string anywhere else becomes a `<label>`, which is what makes `<obj>{message}</obj>` render.
+
+Adding a tag is a firmware change, not a runtime one: a tag is only a name for an `lv` maker, so `<image>` cannot exist until `lv.image()` does. `tools/check-js-api.mjs` enforces exactly that, failing the build if the runtime lists a tag the C layer has no maker for.
 
 ### Event props
 

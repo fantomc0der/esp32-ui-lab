@@ -99,9 +99,63 @@ static const lv_font_t *font_by_size(int px) {
   }
 }
 
+// Roller and dropdown take their choices as one newline-separated string, which
+// is how LVGL wants it and not how anyone would want to write it. An array is
+// accepted and joined; a string is passed through for the caller who already
+// has one. Returns a malloc'd copy the caller frees.
+static char *options_string(JSContext *ctx, JSValueConst v) {
+  if (JS_IsString(v)) {
+    const char *s = JS_ToCString(ctx, v);
+    if (!s) return nullptr;
+    const size_t n = strlen(s) + 1;
+    char *out = static_cast<char *>(malloc(n));
+    if (out) memcpy(out, s, n);
+    JS_FreeCString(ctx, s);
+    return out;
+  }
+
+  JSValue lenv = JS_GetPropertyStr(ctx, v, "length");
+  if (JS_IsUndefined(lenv)) { JS_FreeValue(ctx, lenv); return nullptr; }
+  uint32_t len = 0;
+  JS_ToUint32(ctx, &len, lenv);
+  JS_FreeValue(ctx, lenv);
+
+  // Measure, then fill: two passes over a handful of short strings is cheaper
+  // than growing a buffer in PSRAM, and it cannot leave a partial result.
+  size_t total = 1;
+  for (uint32_t i = 0; i < len; i++) {
+    JSValue item = JS_GetPropertyUint32(ctx, v, i);
+    const char *s = JS_ToCString(ctx, item);
+    if (s) { total += strlen(s) + 1; JS_FreeCString(ctx, s); }
+    JS_FreeValue(ctx, item);
+  }
+  char *out = static_cast<char *>(malloc(total));
+  if (!out) return nullptr;
+
+  char *at = out;
+  for (uint32_t i = 0; i < len; i++) {
+    JSValue item = JS_GetPropertyUint32(ctx, v, i);
+    const char *s = JS_ToCString(ctx, item);
+    if (s) {
+      if (at != out) *at++ = '\n';
+      const size_t n = strlen(s);
+      memcpy(at, s, n);
+      at += n;
+      JS_FreeCString(ctx, s);
+    }
+    JS_FreeValue(ctx, item);
+  }
+  *at = '\0';
+  return out;
+}
+
 static void widget_set_text(lv_obj_t *obj, const char *text) {
   if (lv_obj_check_type(obj, &lv_label_class)) {
     lv_label_set_text(obj, text);
+    return;
+  }
+  if (lv_obj_check_type(obj, &lv_checkbox_class)) {
+    lv_checkbox_set_text(obj, text);
     return;
   }
   if (lv_obj_check_type(obj, &lv_button_class)) {
@@ -121,12 +175,29 @@ static void widget_set_value(lv_obj_t *obj, JSContext *ctx, JSValueConst v) {
   if (lv_obj_check_type(obj, &lv_slider_class)) {
     int32_t n = 0; JS_ToInt32(ctx, &n, v);
     lv_slider_set_value(obj, n, LV_ANIM_OFF);
+  } else if (lv_obj_check_type(obj, &lv_bar_class)) {
+    // A slider is an lv_bar subclass, but lv_obj_check_type matches the exact
+    // class, so this only ever sees a real bar.
+    int32_t n = 0; JS_ToInt32(ctx, &n, v);
+    lv_bar_set_value(obj, n, LV_ANIM_OFF);
   } else if (lv_obj_check_type(obj, &lv_arc_class)) {
     int32_t n = 0; JS_ToInt32(ctx, &n, v);
     lv_arc_set_value(obj, n);
-  } else if (lv_obj_check_type(obj, &lv_switch_class)) {
+  } else if (lv_obj_check_type(obj, &lv_switch_class) ||
+             lv_obj_check_type(obj, &lv_checkbox_class)) {
+    // Both are on/off, and both carry it in the same state bit.
     if (JS_ToBool(ctx, v)) lv_obj_add_state(obj, LV_STATE_CHECKED);
     else lv_obj_remove_state(obj, LV_STATE_CHECKED);
+  } else if (lv_obj_check_type(obj, &lv_roller_class)) {
+    // The value of a picker is which option is picked, by index.
+    int32_t n = 0; JS_ToInt32(ctx, &n, v);
+    lv_roller_set_selected(obj, n < 0 ? 0 : static_cast<uint32_t>(n), LV_ANIM_OFF);
+  } else if (lv_obj_check_type(obj, &lv_dropdown_class)) {
+    int32_t n = 0; JS_ToInt32(ctx, &n, v);
+    lv_dropdown_set_selected(obj, n < 0 ? 0 : static_cast<uint32_t>(n));
+  } else if (lv_obj_check_type(obj, &lv_led_class)) {
+    if (JS_ToBool(ctx, v)) lv_led_on(obj);
+    else lv_led_off(obj);
   } else if (lv_obj_check_type(obj, &lv_textarea_class)) {
     // A text field's "value" is its text, which is what a script wants back
     // from .value() after the user has typed.
@@ -196,7 +267,12 @@ static void apply_props(JSContext *ctx, lv_obj_t *obj, JSValueConst props) {
   v = get("color");
   if (has(v)) {
     lv_color_t c;
-    if (parse_color(ctx, v, &c)) lv_obj_set_style_text_color(obj, c, 0);
+    if (parse_color(ctx, v, &c)) {
+      // An LED has no text, so `color` means the only colour it has. Anywhere
+      // else it is the text colour, which is what every other widget wants.
+      if (lv_obj_check_type(obj, &lv_led_class)) lv_led_set_color(obj, c);
+      else lv_obj_set_style_text_color(obj, c, 0);
+    }
   }
   JS_FreeValue(ctx, v);
 
@@ -215,6 +291,7 @@ static void apply_props(JSContext *ctx, lv_obj_t *obj, JSValueConst props) {
     JS_ToInt32(ctx, &a, lo); JS_ToInt32(ctx, &b, hi);
     JS_FreeValue(ctx, lo); JS_FreeValue(ctx, hi);
     if (lv_obj_check_type(obj, &lv_slider_class)) lv_slider_set_range(obj, a, b);
+    else if (lv_obj_check_type(obj, &lv_bar_class)) lv_bar_set_range(obj, a, b);
     else if (lv_obj_check_type(obj, &lv_arc_class)) lv_arc_set_range(obj, a, b);
     else if (lv_obj_check_type(obj, &lv_chart_class))
       lv_chart_set_axis_range(obj, LV_CHART_AXIS_PRIMARY_Y, a, b);
@@ -346,6 +423,67 @@ static void apply_props(JSContext *ctx, lv_obj_t *obj, JSValueConst props) {
     JS_FreeValue(ctx, v);
   }
 
+  // `options` is shared by the two pickers, and both want the same string.
+  //
+  // Order matters here in a way it does not for any other prop. apply_props
+  // reads `value` near the top, before this block has given the widget
+  // anything to choose from, and LVGL clamps a selection made against an empty
+  // list to zero. So `value` is applied a second time below, once the options
+  // exist — otherwise `{options: [...], value: 2}` in a single call would
+  // always land on the first item.
+  if (lv_obj_check_type(obj, &lv_roller_class) || lv_obj_check_type(obj, &lv_dropdown_class)) {
+    const bool roller = lv_obj_check_type(obj, &lv_roller_class);
+
+    v = get("options");
+    if (has(v)) {
+      char *opts = options_string(ctx, v);
+      if (opts) {
+        if (roller) {
+          JSValue inf = get("infinite");
+          const bool wrap = has(inf) && JS_ToBool(ctx, inf);
+          JS_FreeValue(ctx, inf);
+          lv_roller_set_options(obj, opts, wrap ? LV_ROLLER_MODE_INFINITE : LV_ROLLER_MODE_NORMAL);
+        } else {
+          lv_dropdown_set_options(obj, opts);
+        }
+        free(opts);
+
+        JSValue sel = get("value");
+        if (has(sel)) widget_set_value(obj, ctx, sel);
+        JS_FreeValue(ctx, sel);
+      }
+    }
+    JS_FreeValue(ctx, v);
+
+    if (roller) {
+      v = get("visibleRows");
+      if (has(v)) { JS_ToInt32(ctx, &n, v); lv_roller_set_visible_row_count(obj, n < 1 ? 1 : n); }
+      JS_FreeValue(ctx, v);
+    }
+  }
+
+  if (lv_obj_check_type(obj, &lv_led_class)) {
+    v = get("brightness");
+    if (has(v)) {
+      JS_ToInt32(ctx, &n, v);
+      lv_led_set_brightness(obj, static_cast<uint8_t>(n < 0 ? 0 : (n > 255 ? 255 : n)));
+    }
+    JS_FreeValue(ctx, v);
+  }
+
+  if (lv_obj_check_type(obj, &lv_spinner_class)) {
+    // One call sets both, so read both and keep whatever was not given.
+    JSValue dur = get("duration"), sweep = get("sweep");
+    if (has(dur) || has(sweep)) {
+      int32_t t = static_cast<int32_t>(lv_spinner_get_anim_duration(obj));
+      int32_t a = static_cast<int32_t>(lv_spinner_get_arc_sweep(obj));
+      if (has(dur)) JS_ToInt32(ctx, &t, dur);
+      if (has(sweep)) JS_ToInt32(ctx, &a, sweep);
+      lv_spinner_set_anim_params(obj, t, a);
+    }
+    JS_FreeValue(ctx, dur); JS_FreeValue(ctx, sweep);
+  }
+
   if (lv_obj_check_type(obj, &lv_textarea_class)) {
     v = get("placeholder");
     if (has(v)) {
@@ -421,8 +559,18 @@ static JSValue js_widget_value(JSContext *ctx, JSValueConst this_val, int argc, 
     return JS_DupValue(ctx, this_val);
   }
   if (lv_obj_check_type(obj, &lv_slider_class)) return JS_NewInt32(ctx, lv_slider_get_value(obj));
+  if (lv_obj_check_type(obj, &lv_bar_class)) return JS_NewInt32(ctx, lv_bar_get_value(obj));
   if (lv_obj_check_type(obj, &lv_arc_class)) return JS_NewInt32(ctx, lv_arc_get_value(obj));
-  if (lv_obj_check_type(obj, &lv_switch_class)) return JS_NewBool(ctx, lv_obj_has_state(obj, LV_STATE_CHECKED));
+  if (lv_obj_check_type(obj, &lv_switch_class) || lv_obj_check_type(obj, &lv_checkbox_class))
+    return JS_NewBool(ctx, lv_obj_has_state(obj, LV_STATE_CHECKED));
+  if (lv_obj_check_type(obj, &lv_led_class))
+    return JS_NewBool(ctx, lv_led_get_brightness(obj) > LV_LED_BRIGHT_MIN);
+  // A picker's value is which option is picked, by index into the list the
+  // script passed as `options` — so it never has to parse a string back.
+  if (lv_obj_check_type(obj, &lv_roller_class))
+    return JS_NewInt32(ctx, static_cast<int32_t>(lv_roller_get_selected(obj)));
+  if (lv_obj_check_type(obj, &lv_dropdown_class))
+    return JS_NewInt32(ctx, static_cast<int32_t>(lv_dropdown_get_selected(obj)));
   if (lv_obj_check_type(obj, &lv_textarea_class)) {
     const char *s = lv_textarea_get_text(obj);
     return JS_NewString(ctx, s ? s : "");
@@ -543,7 +691,8 @@ static JSValue js_widget_bounds(JSContext *ctx, JSValueConst this_val, int, JSVa
 // ---------------------------------------------------------------- constructors
 
 enum WidgetKind { W_OBJ, W_BUTTON, W_LABEL, W_SLIDER, W_SWITCH, W_ARC, W_LIST, W_CHART,
-                  W_TABVIEW, W_TEXTAREA, W_KEYBOARD };
+                  W_TABVIEW, W_TEXTAREA, W_KEYBOARD, W_BAR, W_CHECKBOX, W_ROLLER,
+                  W_DROPDOWN, W_SPINNER, W_LED };
 
 static JSValue js_lv_make(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv, int magic) {
   if (argc < 1) return JS_ThrowTypeError(ctx, "widget(parent, props?) needs a parent");
@@ -563,6 +712,12 @@ static JSValue js_lv_make(JSContext *ctx, JSValueConst, int argc, JSValueConst *
     case W_TABVIEW:  obj = lv_tabview_create(parent); break;
     case W_TEXTAREA: obj = lv_textarea_create(parent); break;
     case W_KEYBOARD: obj = lv_keyboard_create(parent); break;
+    case W_BAR:      obj = lv_bar_create(parent); break;
+    case W_CHECKBOX: obj = lv_checkbox_create(parent); break;
+    case W_ROLLER:   obj = lv_roller_create(parent); break;
+    case W_DROPDOWN: obj = lv_dropdown_create(parent); break;
+    case W_SPINNER:  obj = lv_spinner_create(parent); break;
+    case W_LED:      obj = lv_led_create(parent); break;
   }
   if (!obj) return JS_ThrowInternalError(ctx, "widget create failed");
   if (argc >= 2) apply_props(ctx, obj, argv[1]);
@@ -640,6 +795,8 @@ void js_install_lv(JSContext *ctx) {
       {"obj", W_OBJ}, {"button", W_BUTTON}, {"label", W_LABEL}, {"slider", W_SLIDER},
       {"switch", W_SWITCH}, {"arc", W_ARC}, {"list", W_LIST}, {"chart", W_CHART},
       {"tabview", W_TABVIEW}, {"textarea", W_TEXTAREA}, {"keyboard", W_KEYBOARD},
+      {"bar", W_BAR}, {"checkbox", W_CHECKBOX}, {"roller", W_ROLLER},
+      {"dropdown", W_DROPDOWN}, {"spinner", W_SPINNER}, {"led", W_LED},
   };
   for (auto &m : kMakers) {
     JS_SetPropertyStr(ctx, lv, m.name,

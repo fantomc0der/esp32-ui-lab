@@ -35,6 +35,42 @@ export function makeFs(files = {}) {
   };
 }
 
+// `sys` and `wifi`, fixed so two runs are comparable. The readings are frozen
+// rather than live: a parity test between two versions of an app needs both to
+// see the same numbers, or every label differs for reasons that have nothing to
+// do with the port.
+export function makeSys(over = {}) {
+  return {
+    heap: () => ({ internal: 210 * 1024, psram: 7900 * 1024 }),
+    fps: () => 27,
+    uptime: () => 125000,
+    battery: () => 4.02,
+    backlight: pct => pct,
+    info: () => ({ model: "ESP32-S3", rev: 0, cores: 2, mhz: 240, flashMB: 16,
+                   psramMB: 8, lvgl: "9.5.0", quickjs: "0.15.1" }),
+    launch: () => true,
+    pin: () => true,
+    unpin: () => true,
+    pinned: () => null,
+    ...over,
+  };
+}
+
+export function makeWifi(nets = [{ ssid: "home", rssi: -52, open: false },
+                                 { ssid: "guest", rssi: -71, open: true }]) {
+  const pending = [];
+  return {
+    status: () => ({ connected: true, ssid: "home", ip: "10.0.0.4", rssi: -52, saved: true }),
+    save: () => true,
+    connect: () => true,
+    forget: () => true,
+    // Async in the real binding: the callback lands on a later tick, which is
+    // what an app has to cope with. deliver() is how a test runs that tick.
+    scan: fn => { pending.push(fn); return true; },
+    deliver: () => { while (pending.length) pending.shift()(nets); },
+  };
+}
+
 function dumpTree(node, indent) {
   let out = "";
   for (const k of node.kids) {
@@ -184,7 +220,8 @@ export function makeLv() {
     },
   };
   for (const tag of ["obj", "button", "label", "slider", "switch", "arc", "list",
-                     "chart", "tabview", "textarea", "keyboard"]) {
+                     "chart", "tabview", "textarea", "keyboard", "bar", "checkbox",
+                     "roller", "dropdown", "spinner", "led"]) {
     lv[tag] = (parent, props) => makeWidget(tag, parent, props);
   }
 

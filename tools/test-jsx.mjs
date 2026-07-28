@@ -18,7 +18,7 @@ const failures = [];
 // newlines. Those are the source's own, put back so line numbers survive, and
 // they are checked separately below.
 function is(input, expected, what) {
-  const actual = transformJsx(input).trim().replace(/\s+/g, " ");
+  const actual = transformJsx(input).trim().replace(/\s+/g, " ").replace(/\{ /g, "{").replace(/ \}/g, "}");
   if (actual === expected) { passed++; return; }
   failures.push([what || input, expected, actual]);
 }
@@ -71,6 +71,16 @@ is(`<obj>{on ? <label text="y" /> : <label text="n" />}</obj>`,
    "JSX in both arms of a conditional");
 
 is(`<obj>{on && <label />}</obj>`, `h("obj", {}, on && h("label", {}))`, "&& guard");
+
+// Comments between attributes. Real apps annotate a prop, and the transform
+// used to reject the file — found by porting apps/vitals.js, not by writing
+// tests. Note the asymmetry, which is JSX's own: between attributes a comment
+// is a comment, but in the children position it is text, so {/* … */} is the
+// form that works down there.
+is(`<obj\n  a={1}\n  // why b\n  b={2}\n/>`, `h("obj", {a: 1, b: 2})`, "// comment between attributes");
+is(`<obj a={1} /* why b */ b={2} />`, `h("obj", {a: 1, b: 2})`, "/* */ comment between attributes");
+is(`<obj\n  // trailing note\n/>`, `h("obj", {})`, "a comment as the only thing in the tag");
+is(`<obj>// not a comment</obj>`, `h("obj", {}, "// not a comment")`, "a slash pair in children is text");
 
 // ---------------------------------------------------------------- text rules
 
@@ -146,6 +156,11 @@ same(`const s = "a < b and c > d";`, "comparisons inside a string");
     `const c = <>\n  <label />\n</>;\n`,
     `const d = <obj>\n  {list.map(i => (\n    <label key={i} />\n  ))}\n</obj>;\n`,
     `const e = <obj a="one" b={two}>text</obj>;\n`,
+    // A comment child is dropped, but the line it sat on — and the newline in
+    // front of it — still have to come back. Found by porting apps/vitals.js.
+    `const f = <obj>\n  {/* why */}\n  <label />\n</obj>;\n`,
+    `const g = <obj>\n  {/* only child */}\n</obj>;\n`,
+    `const h2 = <obj\n  a={1}\n  // note\n  b={2}\n/>;\n`,
   ];
   for (const src of cases) {
     const out = transformJsx(src);

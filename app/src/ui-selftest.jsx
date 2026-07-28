@@ -77,6 +77,25 @@ function Ticker() {
   return <label text="ticking" hidden />;
 }
 
+// One of every tag that is not exercised above, so the JSX path to each maker
+// is covered rather than just the reconciler's bookkeeping. Hidden: this is
+// about the props arriving, not about what it looks like.
+const tags = {};
+const keep = name => w => { if (w) tags[name] = w; };
+
+function EveryWidget() {
+  return (
+    <obj w={1} h={1} hidden border={0} pad={0} scroll={false}>
+      <bar ref={keep("bar")} w={40} h={8} range={[0, 200]} value={150} />
+      <checkbox ref={keep("checkbox")} value>Enable</checkbox>
+      <roller ref={keep("roller")} options={["red", "green", "blue"]} value={2} />
+      <dropdown ref={keep("dropdown")} options={["one", "two", "three"]} value={1} />
+      <spinner ref={keep("spinner")} w={16} h={16} duration={800} sweep={60} />
+      <led ref={keep("led")} w={8} h={8} color="#4CAF50" value />
+    </obj>
+  );
+}
+
 function Probe() {
   const [rows, setR] = useState(["a", "b", "c"]);
   const [label, setL] = useState("first");
@@ -90,6 +109,7 @@ function Probe() {
       <label ref={w => { if (w) kept.head = w; }} text={label} font={16} color="#7FC4FF" />
       {rows.map(id => <Row key={id} id={id} text={"row " + id} />)}
       {ticking && <Ticker />}
+      <EveryWidget />
     </obj>
   );
 }
@@ -105,6 +125,14 @@ async function run() {
     rowRefs.b.index() === 2 && rowRefs.c.index() === 3);
   check("a ref points at a live widget", () => typeof kept.head.bounds().w === "number");
   check("an effect ran after mount", () => effectLog.length === 1 && effectLog[0] === "up");
+
+  // The JSX path to every maker, not just the ones the reconciler checks use.
+  check("every element tag mounted a widget", () =>
+    ["bar", "checkbox", "roller", "dropdown", "spinner", "led"].every(t => tags[t]));
+  check("props reached the new widgets through JSX", () =>
+    tags.bar.value() === 150 && tags.checkbox.value() === true &&
+    tags.roller.value() === 2 && tags.dropdown.value() === 1 &&
+    tags.led.value() === true);
 
   // A state write must not render immediately: that is the whole reason a
   // click handler is allowed to replace the screen.

@@ -47,6 +47,13 @@ jobs:
       - name: Test the component runtime
         run: node tools/test-ui.mjs
 
+      # apps/vitals.js was rewritten from imperative lv calls to JSX. This runs
+      # the frozen pre-port original and the built port against the same fake
+      # `lv` and fails if they build different widgets — the part of "it behaves
+      # the same" that does not need the panel.
+      - name: Check the ported app against its original
+        run: node tools/test-parity.mjs
+
       # app/apps/*.js is generated from app/src/*.jsx and committed, because it
       # is what the card holds. A source edit without a rebuild would otherwise
       # ship the old app.

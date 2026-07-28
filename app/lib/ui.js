@@ -27,7 +27,8 @@
 // Tag names are the `lv` maker names, so there is no second vocabulary to learn
 // and no mapping table to keep in sync: <slider> is lv.slider().
 const HOST_TAGS = ["obj", "button", "label", "slider", "switch", "arc", "list",
-                   "chart", "tabview", "textarea", "keyboard"];
+                   "chart", "tabview", "textarea", "keyboard", "bar", "checkbox",
+                   "roller", "dropdown", "spinner", "led"];
 
 // Two tags that are not makers, because their widget is created by the parent
 // rather than by lv.<tag>(parent):
@@ -43,7 +44,7 @@ const PARENT_MADE = { row: "list", tab: "tabview" };
 const FIXED_ORDER = { tabview: true };
 
 // Tags where text children set the `text` prop instead of becoming a widget.
-const TEXT_PROP = { label: true, button: true, row: true };
+const TEXT_PROP = { label: true, button: true, row: true, checkbox: true };
 
 // on<Event> prop -> the .on() event name.
 const EVENTS = {

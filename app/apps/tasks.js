@@ -145,28 +145,29 @@ lv.screen().set({ bg: "#0B1622" });
 render(h(App, {}));
 }
 const {h, Fragment, render, useState, useEffect, useRef, useMemo, useCallback, useInterval} = (function () {
-const HOST_TAGS = ["obj", "button", "label", "slider", "switch", "arc", "list", "chart", "tabview", "textarea", "keyboard"]; const PARENT_MADE = { row: "list", tab: "tabview" };
-const FIXED_ORDER = { tabview: true }; const TEXT_PROP = { label: true, button: true, row: true }; const EVENTS = {
-onClick: "click", onChange: "change", onPress: "press", onPressing: "pressing", onLongPress: "longpress", onReady: "ready", onCancel: "cancel", };
-const CREATE_ONLY = { seriesColor: true, name: true }; const RESET = { hidden: false, text: "", scroll: true, clickable: true };
-const NOT_A_PROP = { key: true, ref: true, children: true }; function h(type, props, ...kids) { const p = {}; for (const k in props) p[k] = props[k];
-if (kids.length) p.children = kids.length === 1 ? kids[0] : kids; return { type, key: p.key === undefined || p.key === null ? null : String(p.key), props: p,
-kids: flatten(p.children), }; } function Fragment(props) { return props.children; } function flatten(kids, out) { out = out || [];
-if (kids === undefined || kids === null || kids === false || kids === true) return out; if (Array.isArray(kids)) { for (const k of kids) flatten(k, out); return out; }
-out.push(kids); return out; } const isText = v => typeof v === "string" || typeof v === "number"; let current = null; let hookAt = 0; function slot(init) {
-if (!current) throw new Error("hooks can only be called while a component renders"); const hooks = current.hooks; if (hooks.length <= hookAt) hooks.push(init());
-return hooks[hookAt++]; } function useState(initial) { const inst = current; const cell = slot(() => { const c = { v: typeof initial === "function" ? initial() : initial };
-c.set = next => { const v = typeof next === "function" ? next(c.v) : next; if (Object.is(v, c.v)) return; c.v = v; invalidate(inst); }; return c; }); return [cell.v, cell.set]; }
-function useRef(initial) { return slot(() => ({ current: initial })); } function useMemo(fn, deps) { const s = slot(() => ({ deps: null, v: undefined, first: true }));
-if (s.first || !sameDeps(s.deps, deps)) { s.v = fn(); s.deps = deps; s.first = false; } return s.v; } function useCallback(fn, deps) { return useMemo(() => fn, deps); }
-function useEffect(fn, deps) { const inst = current; const s = slot(() => ({ deps: null, cleanup: null, first: true })); if (s.first || !sameDeps(s.deps, deps)) { s.deps = deps;
-s.first = false; inst.pending.push(s, fn); } } function useInterval(fn, ms) { const held = useRef(fn); held.current = fn; useEffect(() => {
-if (ms === null || ms === undefined || ms === false) return undefined; const t = lv.timer(ms, () => held.current()); return () => t.stop(); }, [ms]); } function sameDeps(a, b) {
-if (!a || !b || a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false; return true; } const dirty = [];
-const effectQueue = []; let scheduled = false; let chain = 0; function invalidate(inst) { if (inst.gone || inst.dirty) return; inst.dirty = true; dirty.push(inst); schedule(); }
-function schedule() { if (scheduled) return; scheduled = true; Promise.resolve().then(flush); } function flush() { scheduled = false; if (++chain > 40) { chain = 0;
-dirty.length = 0; effectQueue.length = 0; console.error("[ui] runaway render: a component sets state on every render, stopping"); return; } while (dirty.length) {
-const inst = dirty.shift(); if (!inst.dirty || inst.gone) continue; inst.dirty = false; try { renderComponent(inst); } catch (e) {
+const HOST_TAGS = ["obj", "button", "label", "slider", "switch", "arc", "list", "chart", "tabview", "textarea", "keyboard", "bar", "checkbox",
+"roller", "dropdown", "spinner", "led"]; const PARENT_MADE = { row: "list", tab: "tabview" }; const FIXED_ORDER = { tabview: true };
+const TEXT_PROP = { label: true, button: true, row: true, checkbox: true }; const EVENTS = { onClick: "click", onChange: "change", onPress: "press", onPressing: "pressing",
+onLongPress: "longpress", onReady: "ready", onCancel: "cancel", }; const CREATE_ONLY = { seriesColor: true, name: true };
+const RESET = { hidden: false, text: "", scroll: true, clickable: true }; const NOT_A_PROP = { key: true, ref: true, children: true }; function h(type, props, ...kids) {
+const p = {}; for (const k in props) p[k] = props[k]; if (kids.length) p.children = kids.length === 1 ? kids[0] : kids; return { type,
+key: p.key === undefined || p.key === null ? null : String(p.key), props: p, kids: flatten(p.children), }; } function Fragment(props) { return props.children; }
+function flatten(kids, out) { out = out || []; if (kids === undefined || kids === null || kids === false || kids === true) return out; if (Array.isArray(kids)) {
+for (const k of kids) flatten(k, out); return out; } out.push(kids); return out; } const isText = v => typeof v === "string" || typeof v === "number"; let current = null;
+let hookAt = 0; function slot(init) { if (!current) throw new Error("hooks can only be called while a component renders"); const hooks = current.hooks;
+if (hooks.length <= hookAt) hooks.push(init()); return hooks[hookAt++]; } function useState(initial) { const inst = current; const cell = slot(() => {
+const c = { v: typeof initial === "function" ? initial() : initial }; c.set = next => { const v = typeof next === "function" ? next(c.v) : next; if (Object.is(v, c.v)) return;
+c.v = v; invalidate(inst); }; return c; }); return [cell.v, cell.set]; } function useRef(initial) { return slot(() => ({ current: initial })); } function useMemo(fn, deps) {
+const s = slot(() => ({ deps: null, v: undefined, first: true })); if (s.first || !sameDeps(s.deps, deps)) { s.v = fn(); s.deps = deps; s.first = false; } return s.v; }
+function useCallback(fn, deps) { return useMemo(() => fn, deps); } function useEffect(fn, deps) { const inst = current;
+const s = slot(() => ({ deps: null, cleanup: null, first: true })); if (s.first || !sameDeps(s.deps, deps)) { s.deps = deps; s.first = false; inst.pending.push(s, fn); } }
+function useInterval(fn, ms) { const held = useRef(fn); held.current = fn; useEffect(() => { if (ms === null || ms === undefined || ms === false) return undefined;
+const t = lv.timer(ms, () => held.current()); return () => t.stop(); }, [ms]); } function sameDeps(a, b) { if (!a || !b || a.length !== b.length) return false;
+for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false; return true; } const dirty = []; const effectQueue = []; let scheduled = false; let chain = 0;
+function invalidate(inst) { if (inst.gone || inst.dirty) return; inst.dirty = true; dirty.push(inst); schedule(); } function schedule() { if (scheduled) return; scheduled = true;
+Promise.resolve().then(flush); } function flush() { scheduled = false; if (++chain > 40) { chain = 0; dirty.length = 0; effectQueue.length = 0;
+console.error("[ui] runaway render: a component sets state on every render, stopping"); return; } while (dirty.length) { const inst = dirty.shift();
+if (!inst.dirty || inst.gone) continue; inst.dirty = false; try { renderComponent(inst); } catch (e) {
 console.error("[ui] <" + (inst.fn.name || "anonymous") + "> failed to render:", e); } } runEffects(); if (!scheduled) chain = 0; } function runEffects() {
 while (effectQueue.length) { const inst = effectQueue.shift(); const pending = inst.pending; inst.pending = []; for (let i = 0; i < pending.length; i += 2) { if (inst.gone) break;
 const s = pending[i], fn = pending[i + 1]; if (s.cleanup) { safely(s.cleanup, "effect cleanup"); s.cleanup = null; } const r = safely(fn, "effect");

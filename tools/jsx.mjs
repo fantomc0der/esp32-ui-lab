@@ -166,6 +166,28 @@ export function transformJsx(src, file = "<input>") {
 
   const skipSpace = () => { while (i < n && /\s/.test(src[i])) i++; };
 
+  // Between attributes, a comment is a comment — the same as in any other
+  // expression. (In the children position it is text, per JSX, which is why
+  // this is not used there and why {/* … */} is the form that works down
+  // there.) Skipped rather than emitted; the newlines it spanned are still
+  // counted by since() when the next attribute is read, so line numbers hold.
+  const skipSpaceAndComments = () => {
+    for (;;) {
+      skipSpace();
+      if (src[i] === "/" && src[i + 1] === "/") {
+        while (i < n && src[i] !== "\n") i++;
+        continue;
+      }
+      if (src[i] === "/" && src[i + 1] === "*") {
+        i += 2;
+        while (i < n && !(src[i] === "*" && src[i + 1] === "/")) i++;
+        i += 2;
+        continue;
+      }
+      return;
+    }
+  };
+
   const readName = () => {
     let name = "";
     while (i < n && (ID_CHAR.test(src[i]) || src[i] === "." || src[i] === "-")) name += src[i++];
@@ -205,11 +227,18 @@ export function transformJsx(src, file = "<input>") {
       seen = i;
       return nl;
     };
+    // peek() does not move `seen`, so a caller that decides to discard what it
+    // just read leaves those newlines still owed. mark() is the commit.
+    const peek = at => newlinesIn(seen, at);
     const mark = () => { seen = i; };
 
     if (name) {
       for (;;) {
+        // `/>` is checked before comments: all three start with a slash, and
+        // only the next character tells them apart.
         skipSpace();
+        if (src[i] === "/" && src[i + 1] === ">") { selfClosing = true; i += 2; break; }
+        skipSpaceAndComments();
         if (i >= n) fail(`unterminated <${name}>`);
         if (src[i] === "/" && src[i + 1] === ">") { selfClosing = true; i += 2; break; }
         if (src[i] === ">") { i++; break; }
@@ -262,7 +291,7 @@ export function transformJsx(src, file = "<input>") {
     // and it does — as the first child's leading newlines, or in the remainder
     // below for a self-closing tag.
 
-    const kids = selfClosing ? [] : readChildren(name, since, mark);
+    const kids = selfClosing ? [] : readChildren(name, peek, mark);
 
     const type = !name ? "Fragment"
                : /^[a-z]/.test(name) && !name.includes(".") ? JSON.stringify(name)
@@ -318,7 +347,7 @@ export function transformJsx(src, file = "<input>") {
 
   const propKey = name => (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name));
 
-  const readChildren = (name, since, mark) => {
+  const readChildren = (name, peek, mark) => {
     const kids = [];
     let text = "";
 
@@ -345,22 +374,24 @@ export function transformJsx(src, file = "<input>") {
       }
       if (src[i] === "<") {
         flushText();
-        const nl = since();
+        const at = i;
+        const nl = peek(at);
         kids.push({ code: readElement(), nl });
         mark();
         continue;
       }
       if (src[i] === "{") {
         flushText();
-        const nl = since();
+        const at = i;
         i++;
         const expr = readCode("}");
         if (src[i] !== "}") fail("unterminated {} in children");
         i++;
-        // {/* a comment */} is a comment, not a child. Its lines still have to
-        // come back, so mark() is deliberately not called for one.
+        // {/* a comment */} is a comment, not a child. Nothing is committed for
+        // one: neither the newlines it spans nor the ones in front of it, which
+        // are still owed and land on the next child or in the remainder.
         if (expr.trim() && !/^\s*\/\*[\s\S]*\*\/\s*$/.test(expr)) {
-          kids.push({ code: tidy(expr), nl });
+          kids.push({ code: tidy(expr), nl: peek(at) });
           mark();
         }
         continue;

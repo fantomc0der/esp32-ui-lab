@@ -192,6 +192,37 @@ it("dropping a handler prop stops the callback", async () => {
   eq(seen, [1], "clicks that reached the handler");
 });
 
+it("the widgets added to the binding layer are reachable as tags", () => {
+  const { ui, dump } = fresh();
+  const { h, render } = ui;
+  render([
+    h("bar", { range: [0, 100], value: 40 }),
+    h("checkbox", null, "Enable"),
+    h("roller", { options: ["one", "two"], value: 1 }),
+    h("dropdown", { options: ["a", "b"] }),
+    h("spinner", { duration: 800 }),
+    h("led", { color: "#4CAF50", value: true }),
+  ]);
+  eq(dump(), 'bar\ncheckbox "Enable"\nroller\ndropdown\nspinner\nled\n');
+});
+
+it("an options array is compared by contents, not identity", async () => {
+  const { ui, patches } = fresh();
+  const { h, render, useState } = ui;
+  let pick;
+  function App() {
+    const [n, setN] = useState(0);
+    pick = () => setN(1);
+    // A fresh array literal every render, as any real app would write it.
+    return h("roller", { options: ["red", "green", "blue"], value: n });
+  }
+  render(h(App));
+  patches.length = 0;
+  pick();
+  await settle();
+  eq(patches, [{ tag: "roller", keys: ["value"] }], "only the selection was rewritten");
+});
+
 it("a change event carries the widget's value", () => {
   const { ui, screen, fire } = fresh();
   const { h, render } = ui;

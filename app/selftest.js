@@ -121,6 +121,46 @@ check("flexAlign accepts a pair", () => {
   return true;
 });
 
+// ---------------------------------------------------------------- forms and status
+const forms = lv.obj(scr, { w: 120, h: 60, hidden: true, scroll: false });
+
+const bar = lv.bar(forms, { w: 100, h: 10, range: [0, 200], value: 150 });
+check("bar stores its value", () => bar.value() === 150);
+check("bar clamps to its range", () => { bar.value(500); return bar.value() === 200; });
+
+const cb = lv.checkbox(forms, { text: "Enable", value: true });
+check("checkbox reads back true", () => cb.value() === true);
+check("checkbox reads back false", () => { cb.value(false); return cb.value() === false; });
+
+const roller = lv.roller(forms, { options: ["red", "green", "blue"], value: 1 });
+// The trap this covers: apply_props reads `value` before it reads `options`,
+// so a selection passed alongside the list it indexes into would land on 0
+// unless it is applied a second time.
+check("roller takes options and a selection in one call", () => roller.value() === 1);
+check("roller selection round-trips", () => { roller.value(2); return roller.value() === 2; });
+check("roller accepts a newline string too", () => {
+  const r = lv.roller(forms, { options: "a\nb\nc", value: 2 });
+  const ok = r.value() === 2;
+  r.delete();
+  return ok;
+});
+
+const dd = lv.dropdown(forms, { options: ["one", "two", "three"], value: 2 });
+check("dropdown takes options and a selection in one call", () => dd.value() === 2);
+check("dropdown selection round-trips", () => { dd.value(0); return dd.value() === 0; });
+
+check("spinner creates and takes its timings", () => {
+  const sp = lv.spinner(forms, { w: 20, h: 20, duration: 800, sweep: 60 });
+  const ok = typeof sp === "object";
+  sp.delete();
+  return ok;
+});
+
+const led = lv.led(forms, { w: 12, h: 12, color: "#4CAF50", value: true });
+check("led reads back on", () => led.value() === true);
+check("led reads back off", () => { led.value(false); return led.value() === false; });
+check("led accepts a brightness", () => led.set({ value: true, brightness: 120 }) === led);
+
 // ---------------------------------------------------------------- delete and index
 //
 // The two the component runtime is built on: removing one child of a container

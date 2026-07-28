@@ -76,7 +76,7 @@ The bottom-right corner is one firmware-owned slot on `lv_layer_top()` holding a
 
 `jsvm_network_setup_needed()` is true when the running script used `fetch()`/`wifi.status()`, is not connected, and the failure is one a person can fix: nothing saved, a rejected password, or a network missing for 6 retry attempts (≈64 s). Transient failures stay hidden so the supervisor can retry and the app can just say "offline" — that split lives in `failure_needs_a_person()` in `bindings_wifi.cpp`, keyed on the same reason codes as `reason_name()`, so the two must stay in agreement.
 
-**JS binding surface** (`lv`, `sys`, `fs`, `wifi`, `fetch`, `console` — full reference in `docs/binding-api.md`): 11 widget makers plus ~30 module functions, curated rather than a full binding. Key invariants when changing the binding layer (`firmware/lvgl-js-bindings/src`):
+**JS binding surface** (`lv`, `sys`, `fs`, `wifi`, `fetch`, `console` — full reference in `docs/binding-api.md`): 17 widget makers plus ~30 module functions, curated rather than a full binding. Key invariants when changing the binding layer (`firmware/lvgl-js-bindings/src`):
 - Callbacks passed to `.on()`/`lv.timer()` are retained with `JS_DupValue` and released exactly once, via an `LV_EVENT_DELETE` hook or `.stop()`.
 - Widget handles are weak pointers; using one after its container is `.clean()`'d throws a JS `TypeError` rather than corrupting memory.
 - Teardown order on reload is fixed: JS timers → `lv_obj_clean(screen)` → screen-level bindings → JS context → runtime.

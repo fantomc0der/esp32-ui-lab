@@ -80,6 +80,25 @@ function Ticker() {
   return h("label", {text: "ticking", hidden: true});
 }
 
+// One of every tag that is not exercised above, so the JSX path to each maker
+// is covered rather than just the reconciler's bookkeeping. Hidden: this is
+// about the props arriving, not about what it looks like.
+const tags = {};
+const keep = name => w => { if (w) tags[name] = w; };
+
+function EveryWidget() {
+  return (
+    h("obj", {w: 1, h: 1, hidden: true, border: 0, pad: 0, scroll: false},
+h("bar", {ref: keep("bar"), w: 40, h: 8, range: [0, 200], value: 150}),
+h("checkbox", {ref: keep("checkbox"), value: true}, "Enable"),
+h("roller", {ref: keep("roller"), options: ["red", "green", "blue"], value: 2}),
+h("dropdown", {ref: keep("dropdown"), options: ["one", "two", "three"], value: 1}),
+h("spinner", {ref: keep("spinner"), w: 16, h: 16, duration: 800, sweep: 60}),
+h("led", {ref: keep("led"), w: 8, h: 8, color: "#4CAF50", value: true}))
+
+  );
+}
+
 function Probe() {
   const [rows, setR] = useState(["a", "b", "c"]);
   const [label, setL] = useState("first");
@@ -92,7 +111,8 @@ function Probe() {
     h("obj", {ref: box, w: "100%", h: "100%", bg: "#101418", border: 0, radius: 0, pad: 4, scroll: false},
 h("label", {ref: w => { if (w) kept.head = w; }, text: label, font: 16, color: "#7FC4FF"}),
 rows.map(id => h(Row, {key: id, id: id, text: "row " + id})),
-ticking && h(Ticker, {}))
+ticking && h(Ticker, {}),
+h(EveryWidget, {}))
 
   );
 }
@@ -108,6 +128,14 @@ async function run() {
     rowRefs.b.index() === 2 && rowRefs.c.index() === 3);
   check("a ref points at a live widget", () => typeof kept.head.bounds().w === "number");
   check("an effect ran after mount", () => effectLog.length === 1 && effectLog[0] === "up");
+
+  // The JSX path to every maker, not just the ones the reconciler checks use.
+  check("every element tag mounted a widget", () =>
+    ["bar", "checkbox", "roller", "dropdown", "spinner", "led"].every(t => tags[t]));
+  check("props reached the new widgets through JSX", () =>
+    tags.bar.value() === 150 && tags.checkbox.value() === true &&
+    tags.roller.value() === 2 && tags.dropdown.value() === 1 &&
+    tags.led.value() === true);
 
   // A state write must not render immediately: that is the whole reason a
   // click handler is allowed to replace the screen.
@@ -177,28 +205,29 @@ async function run() {
 run().catch(e => console.log("FAIL ui-selftest threw — " + e.message + "\n" + e.stack));
 }
 const {h, Fragment, render, useState, useEffect, useRef, useMemo, useCallback, useInterval} = (function () {
-const HOST_TAGS = ["obj", "button", "label", "slider", "switch", "arc", "list", "chart", "tabview", "textarea", "keyboard"]; const PARENT_MADE = { row: "list", tab: "tabview" };
-const FIXED_ORDER = { tabview: true }; const TEXT_PROP = { label: true, button: true, row: true }; const EVENTS = {
-onClick: "click", onChange: "change", onPress: "press", onPressing: "pressing", onLongPress: "longpress", onReady: "ready", onCancel: "cancel", };
-const CREATE_ONLY = { seriesColor: true, name: true }; const RESET = { hidden: false, text: "", scroll: true, clickable: true };
-const NOT_A_PROP = { key: true, ref: true, children: true }; function h(type, props, ...kids) { const p = {}; for (const k in props) p[k] = props[k];
-if (kids.length) p.children = kids.length === 1 ? kids[0] : kids; return { type, key: p.key === undefined || p.key === null ? null : String(p.key), props: p,
-kids: flatten(p.children), }; } function Fragment(props) { return props.children; } function flatten(kids, out) { out = out || [];
-if (kids === undefined || kids === null || kids === false || kids === true) return out; if (Array.isArray(kids)) { for (const k of kids) flatten(k, out); return out; }
-out.push(kids); return out; } const isText = v => typeof v === "string" || typeof v === "number"; let current = null; let hookAt = 0; function slot(init) {
-if (!current) throw new Error("hooks can only be called while a component renders"); const hooks = current.hooks; if (hooks.length <= hookAt) hooks.push(init());
-return hooks[hookAt++]; } function useState(initial) { const inst = current; const cell = slot(() => { const c = { v: typeof initial === "function" ? initial() : initial };
-c.set = next => { const v = typeof next === "function" ? next(c.v) : next; if (Object.is(v, c.v)) return; c.v = v; invalidate(inst); }; return c; }); return [cell.v, cell.set]; }
-function useRef(initial) { return slot(() => ({ current: initial })); } function useMemo(fn, deps) { const s = slot(() => ({ deps: null, v: undefined, first: true }));
-if (s.first || !sameDeps(s.deps, deps)) { s.v = fn(); s.deps = deps; s.first = false; } return s.v; } function useCallback(fn, deps) { return useMemo(() => fn, deps); }
-function useEffect(fn, deps) { const inst = current; const s = slot(() => ({ deps: null, cleanup: null, first: true })); if (s.first || !sameDeps(s.deps, deps)) { s.deps = deps;
-s.first = false; inst.pending.push(s, fn); } } function useInterval(fn, ms) { const held = useRef(fn); held.current = fn; useEffect(() => {
-if (ms === null || ms === undefined || ms === false) return undefined; const t = lv.timer(ms, () => held.current()); return () => t.stop(); }, [ms]); } function sameDeps(a, b) {
-if (!a || !b || a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false; return true; } const dirty = [];
-const effectQueue = []; let scheduled = false; let chain = 0; function invalidate(inst) { if (inst.gone || inst.dirty) return; inst.dirty = true; dirty.push(inst); schedule(); }
-function schedule() { if (scheduled) return; scheduled = true; Promise.resolve().then(flush); } function flush() { scheduled = false; if (++chain > 40) { chain = 0;
-dirty.length = 0; effectQueue.length = 0; console.error("[ui] runaway render: a component sets state on every render, stopping"); return; } while (dirty.length) {
-const inst = dirty.shift(); if (!inst.dirty || inst.gone) continue; inst.dirty = false; try { renderComponent(inst); } catch (e) {
+const HOST_TAGS = ["obj", "button", "label", "slider", "switch", "arc", "list", "chart", "tabview", "textarea", "keyboard", "bar", "checkbox",
+"roller", "dropdown", "spinner", "led"]; const PARENT_MADE = { row: "list", tab: "tabview" }; const FIXED_ORDER = { tabview: true };
+const TEXT_PROP = { label: true, button: true, row: true, checkbox: true }; const EVENTS = { onClick: "click", onChange: "change", onPress: "press", onPressing: "pressing",
+onLongPress: "longpress", onReady: "ready", onCancel: "cancel", }; const CREATE_ONLY = { seriesColor: true, name: true };
+const RESET = { hidden: false, text: "", scroll: true, clickable: true }; const NOT_A_PROP = { key: true, ref: true, children: true }; function h(type, props, ...kids) {
+const p = {}; for (const k in props) p[k] = props[k]; if (kids.length) p.children = kids.length === 1 ? kids[0] : kids; return { type,
+key: p.key === undefined || p.key === null ? null : String(p.key), props: p, kids: flatten(p.children), }; } function Fragment(props) { return props.children; }
+function flatten(kids, out) { out = out || []; if (kids === undefined || kids === null || kids === false || kids === true) return out; if (Array.isArray(kids)) {
+for (const k of kids) flatten(k, out); return out; } out.push(kids); return out; } const isText = v => typeof v === "string" || typeof v === "number"; let current = null;
+let hookAt = 0; function slot(init) { if (!current) throw new Error("hooks can only be called while a component renders"); const hooks = current.hooks;
+if (hooks.length <= hookAt) hooks.push(init()); return hooks[hookAt++]; } function useState(initial) { const inst = current; const cell = slot(() => {
+const c = { v: typeof initial === "function" ? initial() : initial }; c.set = next => { const v = typeof next === "function" ? next(c.v) : next; if (Object.is(v, c.v)) return;
+c.v = v; invalidate(inst); }; return c; }); return [cell.v, cell.set]; } function useRef(initial) { return slot(() => ({ current: initial })); } function useMemo(fn, deps) {
+const s = slot(() => ({ deps: null, v: undefined, first: true })); if (s.first || !sameDeps(s.deps, deps)) { s.v = fn(); s.deps = deps; s.first = false; } return s.v; }
+function useCallback(fn, deps) { return useMemo(() => fn, deps); } function useEffect(fn, deps) { const inst = current;
+const s = slot(() => ({ deps: null, cleanup: null, first: true })); if (s.first || !sameDeps(s.deps, deps)) { s.deps = deps; s.first = false; inst.pending.push(s, fn); } }
+function useInterval(fn, ms) { const held = useRef(fn); held.current = fn; useEffect(() => { if (ms === null || ms === undefined || ms === false) return undefined;
+const t = lv.timer(ms, () => held.current()); return () => t.stop(); }, [ms]); } function sameDeps(a, b) { if (!a || !b || a.length !== b.length) return false;
+for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false; return true; } const dirty = []; const effectQueue = []; let scheduled = false; let chain = 0;
+function invalidate(inst) { if (inst.gone || inst.dirty) return; inst.dirty = true; dirty.push(inst); schedule(); } function schedule() { if (scheduled) return; scheduled = true;
+Promise.resolve().then(flush); } function flush() { scheduled = false; if (++chain > 40) { chain = 0; dirty.length = 0; effectQueue.length = 0;
+console.error("[ui] runaway render: a component sets state on every render, stopping"); return; } while (dirty.length) { const inst = dirty.shift();
+if (!inst.dirty || inst.gone) continue; inst.dirty = false; try { renderComponent(inst); } catch (e) {
 console.error("[ui] <" + (inst.fn.name || "anonymous") + "> failed to render:", e); } } runEffects(); if (!scheduled) chain = 0; } function runEffects() {
 while (effectQueue.length) { const inst = effectQueue.shift(); const pending = inst.pending; inst.pending = []; for (let i = 0; i < pending.length; i += 2) { if (inst.gone) break;
 const s = pending[i], fn = pending[i + 1]; if (s.cleanup) { safely(s.cleanup, "effect cleanup"); s.cleanup = null; } const r = safely(fn, "effect");

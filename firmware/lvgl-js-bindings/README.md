@@ -17,7 +17,7 @@ A component model does exist a layer up, in [`app/lib/ui.js`](../../app/lib/ui.j
 
 | | |
 |---|---|
-| Widgets | `lv.obj`, `lv.button`, `lv.label`, `lv.slider`, `lv.switch`, `lv.arc`, `lv.list`, `lv.chart`, `lv.tabview`, `lv.textarea`, `lv.keyboard`, plus `lv.screen()` for the root |
+| Widgets | `lv.obj`, `lv.button`, `lv.label`, `lv.slider`, `lv.bar`, `lv.switch`, `lv.checkbox`, `lv.arc`, `lv.list`, `lv.chart`, `lv.tabview`, `lv.textarea`, `lv.keyboard`, `lv.roller`, `lv.dropdown`, `lv.spinner`, `lv.led`, plus `lv.screen()` for the root |
 | Props | size (px, `"50%"`, `"content"`), `align`/`x`/`y`, `flex`/`flexAlign`, text, colors, font, `range`, `value`, padding, borders, and a few per-widget extras |
 | Methods | `.set()`, `.on()` (click, change, press, pressing, longpress), `.value()`, `.bounds()`, `.clean()`, `.delete()`, `.index()`, plus `.add()`, `.addTab()`, `.push()`, `.target()` on the widgets that take them |
 | Timers | `lv.timer(ms, fn)`, returning a handle with `.stop()` |

@@ -77,7 +77,9 @@ Before leaving this step, check the things this repo will otherwise fail on late
 
 Follow the `create-pull-request` skill (`.claude/skills/create-pull-request/SKILL.md`) in full for the push, diff review, title and body. Capture the PR number and URL.
 
-Open it as a draft (`gh pr create --draft ...`). This is load-bearing rather than cosmetic: while the PR is a draft the review job skips, which also skips the job that arms auto-merge, so nothing can review or merge work that is still settling. Marking it ready later is the deliberate act that starts the gate.
+Open it as a draft (`gh pr create --draft ...`). This is load-bearing rather than cosmetic: while the PR is a draft the `review` check fails on purpose, which skips the job that arms auto-merge, so nothing can review or merge work that is still settling. Marking it ready later is the deliberate act that starts the gate.
+
+A red `review` on a draft is expected and is not something to fix. It means nothing has reviewed the PR yet. Do not report it to the user as a CI failure.
 
 ### Step 4 — Wait for CI to pass on the draft
 

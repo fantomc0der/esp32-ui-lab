@@ -20,16 +20,28 @@ jobs:
   review:
     # Named to sit alongside `scripts` and `firmware` in the ruleset's required checks.
     name: review
-    # Drafts are skipped, which also skips arm-auto-merge below, so a draft can
-    # never arm the merge. `synchronize` fires on pushes to drafts too, so this
-    # guard does real work rather than just mirroring the event type.
-    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       id-token: write
     steps:
+      # A draft has not been reviewed, so this check must not be green. Guarding the
+      # whole job with `if: draft == false` looks tidier but publishes a `skipped`
+      # conclusion, and GitHub counts `skipped` as satisfying a required check: the
+      # PR reads CLEAN the instant it leaves draft, before any review has run on that
+      # SHA. Failing instead keeps `review` red until a real review turns it green.
+      #
+      # The later steps carry the implicit success() guard, so this failing ends the
+      # job; when the PR is not a draft this step is skipped and costs nothing.
+      # `synchronize` fires on pushes to drafts too, so this is reached often rather
+      # than only when a PR is opened.
+      - name: Refuse to pass on a draft
+        if: github.event.pull_request.draft == true
+        run: |
+          echo "::error::Draft PR, so nothing has reviewed this. Mark it ready for review."
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -110,8 +122,8 @@ jobs:
     name: arm auto-merge
     needs: review
     # Explicit rather than relying on the implicit success() that `needs` provides,
-    # because it also states the draft case: when `review` is skipped on a draft PR
-    # this resolves to 'skipped' and the merge is never armed.
+    # because it also states the draft case: a draft fails `review` above, so this
+    # resolves to 'failure' and the merge is never armed.
     if: needs.review.result == 'success'
     runs-on: ubuntu-latest
     permissions:

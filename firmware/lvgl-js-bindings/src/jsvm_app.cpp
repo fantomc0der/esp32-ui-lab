@@ -82,9 +82,17 @@ static fs::FS *resolveFs(const char *path, const char **out_path) {
   return g_cfg.sd ? g_cfg.sd : g_cfg.flash;
 }
 
-void jsvm_app_request(const char *path) {
-  strncpy(g_next_app, path, sizeof(g_next_app) - 1);
-  g_next_app[sizeof(g_next_app) - 1] = '\0';
+bool jsvm_app_request(const char *path) {
+  // Refuse rather than truncate. A truncated path is a request for a file
+  // nobody asked for, and it comes back as "not found" against a path the user
+  // typed correctly. jsvm_set_pinned_app() answers the same question the same
+  // way.
+  if (strlen(path) >= sizeof(g_next_app)) {
+    Serial.printf("[app] path too long (max %u): %s\n", (unsigned)(sizeof(g_next_app) - 1), path);
+    return false;
+  }
+  strcpy(g_next_app, path);
+  return true;
 }
 
 const char *jsvm_app_current() { return g_current_app[0] ? g_current_app : nullptr; }

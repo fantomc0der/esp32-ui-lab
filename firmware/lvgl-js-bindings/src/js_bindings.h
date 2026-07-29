@@ -170,7 +170,9 @@ void jsvm_app_service();
 // Queues an app switch, performed on the next jsvm_app_service(). Switching is
 // never immediate: the caller is usually inside an LVGL callback or the REPL,
 // and tearing the context down there would free the code that is running.
-void jsvm_app_request(const char *path);
+// Returns false, having queued nothing and said so on Serial, for a path
+// longer than the 127 bytes the request buffer holds.
+bool jsvm_app_request(const char *path);
 
 // The script currently running, or null when only the built-in fallback is up.
 const char *jsvm_app_current();

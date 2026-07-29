@@ -87,9 +87,10 @@ void jsvm_call_reporting(JSValue fn, int argc, JSValueConst *argv) {
 // is parked here and collected by the host from outside the VM.
 static char g_pending_launch[128];
 
-void jsvm_request_launch(const char *name) {
-  strncpy(g_pending_launch, name, sizeof(g_pending_launch) - 1);
-  g_pending_launch[sizeof(g_pending_launch) - 1] = '\0';
+bool jsvm_request_launch(const char *name) {
+  if (strlen(name) >= sizeof(g_pending_launch)) return false;
+  strcpy(g_pending_launch, name);
+  return true;
 }
 
 const char *jsvm_take_pending_launch() {

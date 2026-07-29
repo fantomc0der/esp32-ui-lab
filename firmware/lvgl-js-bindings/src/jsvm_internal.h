@@ -59,8 +59,10 @@ JSValue jsvm_create_timer(JSContext *ctx, int32_t ms, JSValueConst fn);
 // ---------------------------------------------------------------- app switching
 // Records a launch request for the host to pick up after the current call
 // unwinds. See jsvm_take_pending_launch() in js_bindings.h for why it cannot
-// happen synchronously.
-void jsvm_request_launch(const char *name);
+// happen synchronously. Returns false, and records nothing, for a path too
+// long to store: the same answer jsvm_set_pinned_app() gives, since a
+// truncated path is a request for a file nobody asked for.
+bool jsvm_request_launch(const char *name);
 
 // ---------------------------------------------------------------- modules
 // Each module installs its globals on a fresh context at every jsvm_start(),

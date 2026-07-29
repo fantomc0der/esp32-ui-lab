@@ -71,8 +71,11 @@ static JSValue js_sys_launch(JSContext *ctx, JSValueConst, int argc, JSValueCons
   if (argc < 1) return JS_ThrowTypeError(ctx, "launch(name) needs a script path");
   const char *s = JS_ToCString(ctx, argv[0]);
   if (!s) return JS_EXCEPTION;
-  jsvm_request_launch(s);
+  const bool ok = jsvm_request_launch(s);
   JS_FreeCString(ctx, s);
+  // A path too long to record would otherwise be truncated and then reported
+  // as a missing file, which sends the author looking for the wrong problem.
+  if (!ok) return JS_ThrowRangeError(ctx, "script path is too long");
   return JS_UNDEFINED;
 }
 

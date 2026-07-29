@@ -199,14 +199,27 @@ void event_trampoline_runs_the_handler() {
 // LoadProhibited panic. The widget dup is a separate question and not covered
 // here; see the case below.
 //
-// LVGL supports the shape (lv_event_send() backs up the event-list header before
-// iterating precisely so a callback may delete its own object), so a failure here
-// is ours rather than a misuse of the API.
+// LVGL supports the shape, so a failure here is ours rather than a misuse of the
+// API. What makes it legal is a mark-and-check pair rather than anything about the
+// event list: lv_obj_send_event() pushes the lv_event_t onto a global in-flight
+// list, lv_obj_delete() calls lv_event_mark_deleted() to set e->deleted on any
+// whose target is going away, and lv_event_send() re-tests e->deleted after every
+// callback returns and breaks out before touching the freed list again
+// (lv_event.c:125, :141, :318). The back_array_head copy at :117 is a separate
+// concern, freeing the array's contents once the header is gone.
 void a_handler_may_clean_its_own_screen() {
+  // Two counters, one either side of the clean(). `entered` alone would only say
+  // the handler started, since the increment happens before the delete — what
+  // proves it ran to the end is `finished`, set from a statement the interpreter
+  // reaches only after the closure's binding has been freed underneath it. That
+  // also catches a failure that unwinds the handler without aborting the process,
+  // e.g. an exception thrown out of the delete path, which jsvm_call_reporting()
+  // swallows into jsvm_report_exception() rather than propagating.
   const char *kSrc = R"JS(
-    globalThis.ran = 0;
+    globalThis.entered = 0;
+    globalThis.finished = 0;
     const b = lv.button(lv.screen(), { text: "self-destruct" });
-    b.on("click", () => { globalThis.ran++; lv.screen().clean(); });
+    b.on("click", () => { globalThis.entered++; lv.screen().clean(); globalThis.finished++; });
   )JS";
 
   check("ownership: self-cleaning-handler script evaluates", run_script(kSrc));
@@ -217,9 +230,14 @@ void a_handler_may_clean_its_own_screen() {
   host_settle();
 
   const size_t mark = host_serial_mark();
-  jsvm_repl_line("console.log('ran=' + globalThis.ran)");
-  check_printed("ownership: a handler that cleans its own screen still completes", mark,
-                "ran", "1");
+  jsvm_repl_line("console.log('entered=' + globalThis.entered)");
+  check_printed("ownership: a handler that cleans its own screen is entered once", mark,
+                "entered", "1");
+
+  const size_t mark2 = host_serial_mark();
+  jsvm_repl_line("console.log('finished=' + globalThis.finished)");
+  check_printed("ownership: and runs past the delete to its last statement", mark2,
+                "finished", "1");
 
   // And the widget really is gone, so the assertion above is about surviving the
   // delete rather than about a clean() that quietly did nothing.
@@ -235,12 +253,23 @@ void a_handler_may_clean_its_own_screen() {
 // the widget too, but neither touches it afterwards, so nothing there exercises
 // jsvm_arg_widget() from inside a live dispatch.
 //
-// What this deliberately does *not* prove is the trampoline's widget dup. Deleting
-// that dup leaves this passing, because `self.bounds()` throws either way: with the
-// dup the wrapper is alive holding a dead lv_obj_t and lv_obj_is_valid() rejects
-// it, without the dup JS_GetOpaque2 rejects it instead. Same observable from both,
-// so the assertion cannot tell them apart — see the limits list in
-// docs/host-test.md. The fn dup is covered, by the case above this one.
+// What this deliberately does *not* prove is the trampoline's widget dup, and the
+// reason is not the one it looks like. Deleting that dup together with its matching
+// JS_FreeValue leaves all 29 assertions green, and not because the wrapper is freed
+// and the throw coincides: the wrapper is never freed at all. JS_Call always passes
+// JS_CALL_FLAG_COPY_ARGV (quickjs.c:20378), so the arg-copy condition at :17632
+// holds whatever argc is, and the callee dups every argument into its own frame at
+// :17656. `self` is rooted by that frame for the whole call, so the binding dropping
+// its reference mid-handler takes the refcount to 1, not to 0. Measured rather than
+// argued: with the dup gone, a handler that deletes its widget and then churns 20000
+// allocations still reads `self` with no sanitizer report. For a JS closure the
+// widget dup is therefore redundant, and nothing asserted here can distinguish it.
+// See the limits list in docs/host-test.md.
+//
+// Keeping the dup is still right: it is the ownership rule this file's header
+// states, JS_Call's arg copying is one engine version's implementation detail, and
+// deleting only the dup while leaving the JS_FreeValue *is* caught here as an
+// over-release. The fn dup is covered outright, by the case above this one.
 //
 // One trap worth recording, since it cost a round: `typeof self` looks like it
 // touches the wrapper and does not. A JSValue carries its tag inline, so typeof

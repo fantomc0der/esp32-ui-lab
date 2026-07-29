@@ -5,11 +5,26 @@
 // by hand, five cycles at a time, by watching a serial log. That catches a leak
 // that grows fast and nothing else.
 //
-// Here the same loop runs 25 times with the allocator counting, so a leak of a
-// single EventBinding per cycle fails the build. ASan's own leak detector covers
-// what is unreachable at exit; host_heap_live_bytes() covers what is still
-// reachable but should not be — a binding left on the g_events list, a JSValue
-// duped and never freed. Neither catches the other, so both are asserted.
+// Here the same loop runs 25 times with two independent leak checks running, and
+// it is worth being exact about which one sees what, because they do not overlap
+// the way "belt and braces" would suggest:
+//
+//   host_heap_live_bytes()  counts allocations made through heap_caps_* — so the
+//                           JS heap, and every JSValue inside a binding. It sees
+//                           a duped callback that was never released, and it sees
+//                           it at the end of the cycle rather than at exit.
+//
+//   LeakSanitizer           sees anything still allocated and unreachable when the
+//                           process ends, whatever allocator made it. EventBinding
+//                           and TimerBinding come from plain malloc (jsvm_core.cpp
+//                           197 and 253), so this is the only check that sees those
+//                           structs leak.
+//
+// The gap worth naming: a binding left linked on g_events at teardown is both
+// malloc-side (invisible to the counters) and still reachable from a global (so
+// LSan does not call it a leak). Neither check catches that directly. What does
+// catch it is the JSValues it still holds, which the counters do see — which is
+// why the assertion below is on bytes and blocks rather than on the list itself.
 
 #include "host_test.h"
 

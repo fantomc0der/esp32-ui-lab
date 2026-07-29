@@ -152,13 +152,24 @@ jobs:
       - name: Install the toolchain
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      # LVGL is fetched by the build (pinned to the same 9.5.0 the firmware job
-      # installs through arduino-cli), so cache it rather than re-cloning.
-      - name: Cache the fetched LVGL
+      # Cache the LVGL *source clone* only, not the build tree around it. Two
+      # reasons, both learned the hard way:
+      #
+      #   - `_deps` also holds ~900 LVGL object files. Restoring those alongside a
+      #     build directory whose build.ninja and .ninja_log are NOT cached invites
+      #     a stale link: Ninja would have no header-dependency or command-line
+      #     history, while the restored objects are newer than their sources. It
+      #     happens not to bite today (a fresh build.ninja rebuilds everything
+      #     anyway), which is exactly the kind of accident not to depend on.
+      #   - Since the host lv_conf.h includes the board's copy, a change to either
+      #     one changes what LVGL must be compiled as. Keying on both, plus the
+      #     CMake file that sets the sanitizer flags, means the cache cannot
+      #     outlive the configuration it was built for.
+      - name: Cache the LVGL source clone
         uses: actions/cache@v4
         with:
-          path: firmware/host-test/.build/_deps
-          key: host-test-lvgl-9.5.0
+          path: firmware/host-test/.build/_deps/lvgl-src
+          key: host-test-lvgl-9.5.0-${{ hashFiles('firmware/host-test/lv_conf.h', 'firmware/boards/waveshare-s3-touch-147/lv_conf.h', 'firmware/host-test/CMakeLists.txt') }}
 
       - name: Configure
         run: cmake -S firmware/host-test -B firmware/host-test/.build -G Ninja

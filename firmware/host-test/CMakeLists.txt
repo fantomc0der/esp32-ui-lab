@@ -19,11 +19,20 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 if(NOT CMAKE_BUILD_TYPE)
-  # -O1 keeps ASan's stack traces readable while still being fast enough that a
-  # CI run is not dominated by the interpreter; -g0 would remove the line numbers
-  # that make a sanitizer report actionable, so debug info stays on.
-  set(CMAKE_BUILD_TYPE RelWithDebInfo)
+  # Debug, specifically NOT RelWithDebInfo: that one is `-O2 -g -DNDEBUG`, and
+  # the NDEBUG compiles out all 139 assert()s in quickjs.c — including
+  # `assert(p->ref_count > 0)` on the GC's decref path, which is the cheapest
+  # detector available for an over-released JSValue. ASan only reports that once
+  # the object is recycled into another allocation; the assert fires at the
+  # moment the refcount goes wrong. Since catching exactly that class of bug is
+  # the point of this target, giving it up for -O2 would be a poor trade.
+  #
+  # -O1 rather than Debug's -O0: it keeps stack traces readable and the
+  # interpreter fast enough that the suites stay well under a second.
+  set(CMAKE_BUILD_TYPE Debug)
 endif()
+set(CMAKE_CXX_FLAGS_DEBUG "-O1 -g")
+set(CMAKE_C_FLAGS_DEBUG "-O1 -g")
 
 set(FIRMWARE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set(BINDINGS_DIR ${FIRMWARE_DIR}/lvgl-js-bindings/src)
@@ -101,7 +110,7 @@ enable_testing()
 
 # One binary per suite: a crash under ASan takes the process down, so separate
 # binaries mean one failing suite still lets the others report.
-foreach(suite test_ownership test_props test_reload)
+foreach(suite test_ownership test_props test_reload test_modules)
   add_executable(${suite} tests/${suite}.cpp)
   target_link_libraries(${suite} PRIVATE host_bindings)
   add_test(NAME ${suite} COMMAND ${suite})

@@ -39,9 +39,16 @@ void heap_caps_free(void *ptr);
 // Synthetic, and only plausible enough to keep the layer's diagnostics honest:
 // the free-size figures are a fixed notional pool minus what is outstanding.
 // Never assert on these in a test — assert on host_heap_live_bytes() instead.
-size_t heap_caps_get_free_size(uint32_t caps);
-size_t heap_caps_get_largest_free_block(uint32_t caps);
-size_t heap_caps_get_total_size(uint32_t caps);
+//
+// These return uint32_t rather than size_t deliberately. On the ESP32 size_t is
+// 32 bits, so the layer's `Serial.printf("%u bytes free", heap_caps_get_free_size(...))`
+// is correct there; declaring them size_t here (64-bit) would make the same
+// correct-on-target line produce a -Wformat warning on every host build, and the
+// only ways to silence that are editing firmware to suit the host or turning the
+// warning off. Matching the target's width is the honest fix.
+uint32_t heap_caps_get_free_size(uint32_t caps);
+uint32_t heap_caps_get_largest_free_block(uint32_t caps);
+uint32_t heap_caps_get_total_size(uint32_t caps);
 
 // QuickJS's usable_size hook must report 0 on the board (reporting real sizes
 // corrupts the heap under IDF poisoning; docs/engine-notes.md). The host copy of

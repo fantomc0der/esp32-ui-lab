@@ -50,10 +50,14 @@ size_t Preferences::getString(const char *key, char *buf, size_t len) {
   auto it = ns_it->second.find(key);
   if (it == ns_it->second.end()) return 0;
   const std::string &v = it->second;
-  const size_t n = v.size() < len - 1 ? v.size() : len - 1;
-  memcpy(buf, v.data(), n);
-  buf[n] = '\0';
-  return n;
+  // Refuse rather than truncate when the value does not fit, which is what the
+  // real implementation does. Truncating would be the more forgiving choice and
+  // the wrong one: a caller that mis-sizes its buffer would then get a shortened
+  // path that looks valid, and the host would hide a bug the device would hit.
+  if (v.size() + 1 > len) return 0;
+  memcpy(buf, v.data(), v.size());
+  buf[v.size()] = '\0';
+  return v.size();
 }
 
 bool Preferences::remove(const char *key) {

@@ -96,6 +96,15 @@ struct BlockHeader {
   size_t size;
 };
 
+// The header is padded out to max_align_t so the pointer handed back keeps the
+// alignment malloc promised. Without this the offset is sizeof(size_t) == 8 and
+// every pointer comes back 8-mod-16, which is weaker than both malloc and the
+// IDF allocator guarantee — so a host run could pass while the same code hit an
+// alignment fault on a target that cares.
+constexpr size_t kHeaderSize =
+    ((sizeof(BlockHeader) + alignof(max_align_t) - 1) / alignof(max_align_t)) *
+    alignof(max_align_t);
+
 size_t g_live_bytes = 0;
 size_t g_live_blocks = 0;
 
@@ -107,12 +116,16 @@ void *alloc_tracked(size_t size) {
   // malloc(0) is allowed to return either NULL or a unique pointer; force the
   // latter so callers that only check for NULL as failure behave consistently.
   if (size == 0) size = 1;
-  void *raw = malloc(sizeof(BlockHeader) + size);
+  // Refuse rather than wrap: adding the header to a size near SIZE_MAX would
+  // otherwise allocate something tiny and hand back a pointer the caller
+  // believes is huge, which is a heap overflow rather than an allocation failure.
+  if (size > SIZE_MAX - kHeaderSize) return nullptr;
+  void *raw = malloc(kHeaderSize + size);
   if (!raw) return nullptr;
   static_cast<BlockHeader *>(raw)->size = size;
   g_live_bytes += size;
   g_live_blocks++;
-  return static_cast<char *>(raw) + sizeof(BlockHeader);
+  return static_cast<char *>(raw) + kHeaderSize;
 }
 
 }  // namespace
@@ -133,7 +146,7 @@ void *heap_caps_calloc(size_t n, size_t size, uint32_t) {
 
 void heap_caps_free(void *ptr) {
   if (!ptr) return;
-  void *raw = static_cast<char *>(ptr) - sizeof(BlockHeader);
+  void *raw = static_cast<char *>(ptr) - kHeaderSize;
   g_live_bytes -= static_cast<BlockHeader *>(raw)->size;
   g_live_blocks--;
   free(raw);
@@ -145,7 +158,7 @@ void *heap_caps_realloc(void *ptr, size_t size, uint32_t caps) {
     heap_caps_free(ptr);
     return nullptr;
   }
-  void *raw = static_cast<char *>(ptr) - sizeof(BlockHeader);
+  void *raw = static_cast<char *>(ptr) - kHeaderSize;
   const size_t old = static_cast<BlockHeader *>(raw)->size;
   void *fresh = heap_caps_malloc(size, caps);
   if (!fresh) return nullptr;  // original stays valid, as realloc promises
@@ -154,20 +167,23 @@ void *heap_caps_realloc(void *ptr, size_t size, uint32_t caps) {
   return fresh;
 }
 
-size_t heap_caps_get_free_size(uint32_t) {
-  return g_live_bytes >= kNotionalPool ? 0 : kNotionalPool - g_live_bytes;
+uint32_t heap_caps_get_free_size(uint32_t) {
+  return static_cast<uint32_t>(g_live_bytes >= kNotionalPool ? 0
+                                                            : kNotionalPool - g_live_bytes);
 }
 
-size_t heap_caps_get_largest_free_block(uint32_t caps) {
+uint32_t heap_caps_get_largest_free_block(uint32_t caps) {
   return heap_caps_get_free_size(caps);
 }
 
-size_t heap_caps_get_total_size(uint32_t) { return kNotionalPool; }
+uint32_t heap_caps_get_total_size(uint32_t) {
+  return static_cast<uint32_t>(kNotionalPool);
+}
 
 size_t heap_caps_get_allocated_size(void *ptr) {
   if (!ptr) return 0;
-  return static_cast<BlockHeader *>(static_cast<void *>(
-             static_cast<char *>(ptr) - sizeof(BlockHeader)))
+  return static_cast<BlockHeader *>(
+             static_cast<void *>(static_cast<char *>(ptr) - kHeaderSize))
       ->size;
 }
 

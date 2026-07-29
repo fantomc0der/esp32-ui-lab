@@ -21,9 +21,14 @@
 //   LV_MEM_SIZE            Irrelevant once malloc is the C library's, but LVGL
 //                          still validates it, so it is left defined.
 //
-//   LV_LOG_LEVEL           The board logs warnings only. In CI the extra detail
-//                          is free and a failing assert is worth reading, so
-//                          this keeps WARN but routes it somewhere visible.
+//   LV_ASSERT_HANDLER      The board's handler spins in a `while(1);`, which is
+//                          right for a panel you can power-cycle and wrong for
+//                          a CI job, where it would hang until the runner times
+//                          out with no diagnostic. The host aborts instead, so
+//                          the assert prints and ASan's exit path still runs.
+//
+// The log level is deliberately NOT overridden: the board's LV_LOG_LEVEL_WARN
+// is what a host run should see too, and LVGL's warnings reach stderr already.
 #pragma once
 
 // The board's configuration, verbatim: widgets, fonts, colour depth, asserts.

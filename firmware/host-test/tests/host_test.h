@@ -48,6 +48,33 @@ inline void check_eq(const char *name, A got, B want) {
   }
 }
 
+// Asserts that a script printed exactly `key=value` and not merely something
+// starting that way.
+//
+// This exists because a plain substring search is a trap for numeric results:
+// "b=1" is a prefix of "b=10", so a test asserting a timer fired once passed
+// while it was firing ten times. Every count assertion goes through here, which
+// prints a newline-delimited line and matches the delimiter too, so no value can
+// satisfy an assertion meant for a different one.
+inline void check_printed(const char *name, size_t mark, const char *key,
+                          const char *value) {
+  const std::string want = std::string(key) + "=" + value + "\n";
+  const std::string got = host_serial_since(mark);
+  if (got.find(want) != std::string::npos) {
+    ok(name);
+    return;
+  }
+  // Show what the key actually held, which is the useful half of a failure.
+  const std::string prefix = std::string(key) + "=";
+  const size_t at = got.find(prefix);
+  std::string actual = "(never printed)";
+  if (at != std::string::npos) {
+    const size_t end = got.find('\n', at);
+    actual = got.substr(at, end == std::string::npos ? std::string::npos : end - at);
+  }
+  bad(name, std::string("wanted ") + key + "=" + value + ", got " + actual);
+}
+
 // Evaluating a script is the unit most of these tests work in, so the two
 // helpers below wrap the start/settle and stop/verify halves.
 

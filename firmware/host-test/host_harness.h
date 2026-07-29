@@ -11,9 +11,10 @@
 #include <string>
 
 // Creates the LVGL display (a null driver writing into a plain buffer, no SDL
-// and no display libraries in CI) at the panel's real 172x320. The resolution
-// matters: percentage sizes and alignment resolve against it, so a layout
-// assertion here means the same thing it would on the panel.
+// and no display libraries in CI) at the panel's landscape 320x172, taken from
+// the board's own SCREEN_W/SCREEN_H. The resolution matters: percentage sizes and
+// alignment resolve against it, so a layout assertion here means the same thing
+// it would on the panel.
 void host_lvgl_begin();
 
 // Tears LVGL back down. Frees the display and its buffers so a leak in the

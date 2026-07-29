@@ -114,13 +114,25 @@ void sys_info_and_heap_have_the_documented_shape() {
                 "heap=true");
 
   // uptime() comes from millis(), which the harness controls, so this is the one
-  // place the virtual clock is observable from a script.
-  expect_output("sys: uptime() advances with the clock",
-                R"JS(
-                  const a = sys.uptime();
-                  console.log('uptime=' + (a >= 0));
-                )JS",
-                "uptime=true");
+  // place the virtual clock is observable from a script. It needs two reads with
+  // a tick between them: nothing else in this suite advances the clock, so a
+  // single read could only ever assert 0 >= 0, which is true however broken
+  // uptime() is.
+  if (!run_script("globalThis.t0 = sys.uptime();")) {
+    bad("sys: uptime script evaluates", "evaluation threw");
+  } else {
+    ok("sys: uptime script evaluates");
+    host_tick(500);
+    const size_t mark = host_serial_mark();
+    jsvm_repl_line("console.log('elapsed=' + (sys.uptime() - globalThis.t0))");
+    // Exactly the time that was stepped, since the clock is virtual and nothing
+    // else moves it. An approximate check here would tolerate uptime() returning
+    // a constant offset or the wrong unit.
+    check_printed("sys: uptime() advances by exactly the time stepped", mark, "elapsed",
+                  "500");
+  }
+  jsvm_stop();
+  host_settle();
 }
 
 // The pin, and the one thing a host test has to be careful about here.

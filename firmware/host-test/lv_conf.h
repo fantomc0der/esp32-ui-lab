@@ -45,9 +45,19 @@
 #undef LV_USE_STDLIB_MALLOC
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
 
-// LVGL reads this whatever the allocator is; with CLIB it bounds nothing.
+// Only read under LV_STDLIB_BUILTIN, so with CLIB above this bounds nothing. Kept
+// at the board's value so the two files do not appear to disagree.
 #undef LV_MEM_SIZE
 #define LV_MEM_SIZE (48 * 1024U)
+
+// The board leaves this off because it costs a check on every object access, which
+// is not free on a panel trying to hold a frame rate. Here it is free, and it is a
+// second detector for the stale-handle bug that does not depend on the allocator:
+// ASan only reports a use-after-free once the memory has been recycled, whereas
+// this catches an invalid lv_obj_t the moment LVGL is asked to use one. Different
+// mechanism, same defect, and the cheaper of the two to read.
+#undef LV_USE_ASSERT_OBJ
+#define LV_USE_ASSERT_OBJ 1
 
 // LVGL's own asserts stay on (the board enables ASSERT_NULL and ASSERT_MALLOC),
 // and on the host an assert should end the process with a diagnostic rather than

@@ -40,10 +40,12 @@ void timer_stopping_itself_is_safe() {
 
   // Assert through the script itself rather than reaching into the VM: this is
   // the same observation app/selftest.js makes, so both targets check one thing.
+  // check_printed rather than a substring search, because "fired=1" is a prefix
+  // of "fired=10" — which is exactly what a broken self-stop produces over this
+  // many ticks.
   const size_t mark = host_serial_mark();
   jsvm_repl_line("console.log('fired=' + globalThis.fired)");
-  check("ownership: self-stopping timer fires exactly once",
-        host_serial_contains_since(mark, "fired=1"));
+  check_printed("ownership: self-stopping timer fires exactly once", mark, "fired", "1");
 
   jsvm_stop();
   host_settle();
@@ -66,14 +68,20 @@ void stopping_one_timer_leaves_others() {
 
   const size_t mark = host_serial_mark();
   jsvm_repl_line("console.log('b=' + globalThis.b)");
-  check("ownership: the self-stopping one of three fires once",
-        host_serial_contains_since(mark, "b=1"));
+  check_printed("ownership: the self-stopping one of three fires once", mark, "b", "1");
 
-  // The survivors must have kept ticking after their neighbour was unlinked.
+  // The survivors must have kept ticking after their neighbour was unlinked, and
+  // must have ticked the number of times the elapsed 200 ms allows. Asserting the
+  // count rather than "more than one" means a .stop() that leaked into its
+  // neighbours — unlinking the wrong node — shows up here rather than only under
+  // ASan.
   const size_t mark2 = host_serial_mark();
-  jsvm_repl_line("console.log('survived=' + (globalThis.a > 1 && globalThis.c > 1))");
-  check("ownership: the other two keep firing",
-        host_serial_contains_since(mark2, "survived=true"));
+  jsvm_repl_line("console.log('a=' + globalThis.a)");
+  check_printed("ownership: an untouched neighbour fires every interval", mark2, "a", "10");
+
+  const size_t mark3 = host_serial_mark();
+  jsvm_repl_line("console.log('c=' + globalThis.c)");
+  check_printed("ownership: the other neighbour does too", mark3, "c", "10");
 
   jsvm_stop();
   host_settle();
@@ -97,8 +105,7 @@ void stale_handle_throws_rather_than_corrupting() {
 
   const size_t mark = host_serial_mark();
   check("ownership: stale-handle script evaluates", run_script(kSrc));
-  check("ownership: writing through a stale handle throws",
-        host_serial_contains_since(mark, "stale=true"));
+  check_printed("ownership: writing through a stale handle throws", mark, "stale", "true");
 
   jsvm_stop();
   host_settle();
@@ -120,8 +127,8 @@ void stale_handle_read_also_throws() {
 
   const size_t mark = host_serial_mark();
   check("ownership: stale-read script evaluates", run_script(kSrc));
-  check("ownership: reading through a stale handle throws",
-        host_serial_contains_since(mark, "staleread=true"));
+  check_printed("ownership: reading through a stale handle throws", mark, "staleread",
+                "true");
 
   jsvm_stop();
   host_settle();
@@ -208,8 +215,8 @@ void stopping_a_timer_twice_is_a_no_op() {
 
   const size_t mark = host_serial_mark();
   check("ownership: double-stop script evaluates", run_script(kSrc));
-  check("ownership: stopping a timer twice does not throw",
-        host_serial_contains_since(mark, "doublestop_threw=false"));
+  check_printed("ownership: stopping a timer twice does not throw", mark,
+                "doublestop_threw", "false");
 
   host_tick(100);
   jsvm_stop();

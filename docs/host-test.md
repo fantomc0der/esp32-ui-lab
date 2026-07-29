@@ -39,6 +39,8 @@ The pin is worth a note, because the obvious test of it does not work. `bindings
 
 Two independent leak checks run over all of it, and they overlap less than "belt and braces" suggests. `host_heap_live_bytes()` counts allocations made through `heap_caps_*`, so it sees a `JS_DupValue` that was never released, and it sees it at the end of the cycle rather than at exit. LeakSanitizer sees anything unreachable when the process ends whatever allocator made it, which makes it the only check that notices an `EventBinding` or `TimerBinding` leak — those come from plain `malloc` (`jsvm_core.cpp:197` and `:253`). The case neither catches directly is a binding left linked on `g_events`: `malloc`-side, so invisible to the counters, and still reachable from a global, so not a leak by LSan's definition. What catches that one is the JSValues it still holds, which the counters do see.
 
+Counts are asserted exactly, through a `check_printed()` helper that matches a whole `key=value` line rather than a substring. That is not fussiness: a plain substring search made "this timer fired once" pass while the timer was firing ten times, because `b=1` is a prefix of `b=10`. Any assertion on a number goes through the delimited form.
+
 The build type is `Debug` with `-O1`, and deliberately not `RelWithDebInfo`. That preset is `-O2 -g -DNDEBUG`, and the `NDEBUG` compiles out all 139 `assert()`s in `quickjs.c` — including `assert(p->ref_count > 0)` on the GC's decref path, the cheapest detector available for an over-released `JSValue`. Trading that away for `-O2` would be a poor deal in a suite that finishes in half a second either way.
 
 ## What it does not cover, and will not
@@ -47,6 +49,7 @@ Nothing here says anything about hardware. The panel, touch, PSRAM capabilities,
 
 - **The flush path is a no-op.** The byte-swap invariant (`lv_draw_sw_rgb565_swap()` paired with `draw16bitBeRGBBitmap()`) is display-side and cannot be tested here. Rendering runs; the pixels are discarded.
 - **`heap_caps_*` maps onto `malloc`, and the capability flags are ignored.** That is the point — it puts every allocation where ASan can see it — but it means a host run cannot tell you whether something would have fitted in real PSRAM or in DMA-capable internal RAM. The free-size numbers the layer prints are synthetic. Never read them as a memory measurement.
+- **A small underflow through a `heap_caps_*` pointer is the shim's blind spot.** The accounting header sits immediately *before* the address handed out, so writing just before a block hits that header rather than ASan's left redzone. The corruption is silent at the time and surfaces later as an unexplained byte mismatch in `test_reload`. If a reload assertion ever fails for no visible reason, suspect this before suspecting the leak logic. An overflow past the end is caught normally.
 - **There is no input device.** Without one `lv_indev_active()` is always null, so the event trampoline only ever takes its `fn(widget)` path and never `fn(widget, x, y)`. Synthesizing touch would mean inventing coordinates the panel never produced, so event coverage stops at registration and argument validation, exactly as it does in `app/selftest.js`.
 - **Timing is virtual.** `millis()` and LVGL's tick both come from a counter the tests step explicitly, which makes "this timer fired twice" exact instead of racing wall-clock time. It is not a claim about scheduling on the device.
 
@@ -66,7 +69,7 @@ A consequence worth stating: **`app/selftest.js` cannot currently run as the hos
 
 Two things keep it honest. The stubs mirror the real include graph rather than being a convenience header — `Arduino.h` pulls in `esp_heap_caps.h` because the ESP32 core's does, and `bindings_fs.cpp` relies on exactly that. And the host `lv_conf.h` **includes the board's copy** instead of duplicating it, overriding only the three settings the host needs differently, so which widgets exist and which fonts a script may select are physically the same values the panel builds with. A host test cannot pass against a configuration the board does not run.
 
-The override that matters is `LV_USE_STDLIB_MALLOC` → `LV_STDLIB_CLIB`. LVGL's builtin allocator is a pool it manages itself, so ASan would see one large `malloc` and none of the widget allocations inside it; routing LVGL onto the C library's `malloc` is what makes a widget-level use-after-free visible.
+The override that matters is `LV_USE_STDLIB_MALLOC` → `LV_STDLIB_CLIB`. LVGL's builtin allocator is a pool it manages itself, so ASan would see one large `malloc` and none of the widget allocations inside it; routing LVGL onto the C library's `malloc` is what makes a widget-level use-after-free visible. `LV_USE_ASSERT_OBJ` is also turned on, which the board leaves off because it costs a check on every object access: here it is free and gives a second, allocator-independent detector for the stale-handle case, firing when LVGL is handed an invalid object rather than waiting for the memory to be recycled.
 
 ## In CI
 

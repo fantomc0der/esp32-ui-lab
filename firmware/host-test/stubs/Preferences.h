@@ -3,8 +3,14 @@
 // Used by bindings_sys.cpp for the app pin (sys.pin()), which needs exactly
 // begin/end/getString/putString/remove. Backed by a process-local store, so it
 // behaves like NVS within a run without persisting beyond it: the store outlives
-// any single Preferences instance, which is what makes "the pin survives a
-// restart" observable across a jsvm_stop()/jsvm_start() pair.
+// any single Preferences instance, the way NVS outlives the handle that opened it.
+//
+// What it deliberately does NOT give you is "the pin survives a restart" across a
+// jsvm_stop()/jsvm_start() pair. bindings_sys.cpp caches the pin in a file-static
+// that nothing resets, so after any write every later read is answered from that
+// cache rather than from here. Observing a real read means seeding the store with
+// host_seed() before anything has populated the cache — see test_modules.cpp and
+// docs/host-test.md, which record how that was verified.
 #pragma once
 
 #include <stddef.h>

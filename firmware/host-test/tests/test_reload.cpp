@@ -88,10 +88,12 @@ void reload_cycles_do_not_grow() {
     // would be asserting that not running anything leaks nothing, which is true
     // and worthless.
     if (i == 0) {
+      // The exact count, not "more than one": 200 ms of 5 ms slices against a
+      // 50 ms timer is four firings, and asserting the number means a timer that
+      // silently stopped early fails here rather than passing a weaker check.
       const size_t mark = host_serial_mark();
-      jsvm_repl_line("console.log('ticks=' + ((globalThis.ticks|0) > 1))");
-      check("reload: the script's timer fires during a cycle",
-            host_serial_contains_since(mark, "ticks=true"));
+      jsvm_repl_line("console.log('ticks=' + (globalThis.ticks|0))");
+      check_printed("reload: the script's timer fires every interval", mark, "ticks", "4");
     }
 
     jsvm_stop();

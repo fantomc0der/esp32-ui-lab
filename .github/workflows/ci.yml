@@ -152,6 +152,14 @@ jobs:
       - name: Install the toolchain
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      # The cached lvgl-subbuild carries a CMakeCache.txt stamped with this
+      # runner's CMake version, and a stale one makes the build fail rather than
+      # pass wrongly. Putting the version in the cache key turns that red job into
+      # a cache miss instead.
+      - name: Record the CMake version for the cache key
+        id: cmakever
+        run: echo "v=$(cmake --version | head -1 | tr -d ' .')" >> "$GITHUB_OUTPUT"
+
       # Cache the LVGL clone, skipping the ~900 object files in _deps/lvgl-build:
       # those are rebuilt from scratch anyway (a restored build tree has no
       # .ninja_log, so Ninja treats every output as dirty), and caching stale
@@ -174,7 +182,7 @@ jobs:
           path: |
             firmware/host-test/.build/_deps/lvgl-src
             firmware/host-test/.build/_deps/lvgl-subbuild
-          key: host-test-lvgl-9.5.0-${{ hashFiles('firmware/host-test/lv_conf.h', 'firmware/boards/waveshare-s3-touch-147/lv_conf.h', 'firmware/host-test/CMakeLists.txt') }}
+          key: host-test-lvgl-9.5.0-${{ steps.cmakever.outputs.v }}-${{ hashFiles('firmware/host-test/lv_conf.h', 'firmware/boards/waveshare-s3-touch-147/lv_conf.h', 'firmware/host-test/CMakeLists.txt') }}
 
       - name: Configure
         run: cmake -S firmware/host-test -B firmware/host-test/.build -G Ninja

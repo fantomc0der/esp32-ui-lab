@@ -83,15 +83,16 @@ A red `review` on a draft is expected and is not something to fix. It means noth
 
 ### Step 4 — Wait for CI to pass on the draft
 
-`ci.yml` runs on every push regardless of draft state. Poll until the checks on the current head SHA complete:
+`ci.yml` runs on every push regardless of draft state. Wait for the checks on the current head SHA to finish, then judge only the CI ones:
 
 ```bash
-gh pr checks <PR> --watch
+gh pr checks <PR> --watch || true
+gh pr checks <PR> --json name,state --jq '.[] | select(.name == "scripts" or .name == "firmware")'
 ```
 
-Expect `scripts` and `firmware`. The `firmware` job compiles the ESP32 toolchain and is the slow one; several minutes is normal, more on a cold cache.
+The `|| true` is required, not sloppiness. `review` is failed by design on a draft, so `--watch` always exits non-zero here and would otherwise abort the step or send you investigating a check that is behaving correctly. Only `scripts` and `firmware` decide whether this step passed. The `firmware` job compiles the ESP32 toolchain and is the slow one; several minutes is normal, more on a cold cache.
 
-If a check **fails**, read its log:
+If `scripts` or `firmware` **fails**, read its log:
 
 ```bash
 gh run view <run-id> --log-failed

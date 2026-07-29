@@ -9,6 +9,8 @@
 //      last reference to the closure that is mid-call. JS_Call only borrows
 //      func_obj, so without the trampoline's own dup this frees the running
 //      closure underneath the interpreter (a LoadProhibited panic on hardware).
+//      The layer has two trampolines and the same hazard on both, so the event
+//      one is here too: a click handler that cleans the screen it is attached to.
 //
 //   2. A widget handle used after its container was cleaned. Writing through a
 //      stale handle used to silently corrupt the heap; jsvm_arg_widget() now
@@ -17,6 +19,8 @@
 // app/selftest.js covers both on hardware. The difference here is ASan: on the
 // board a leaked dup is invisible and a freed-closure call sometimes survives by
 // luck, whereas here either one fails the build.
+
+#include <lvgl.h>
 
 #include "host_test.h"
 
@@ -134,6 +138,140 @@ void stale_handle_read_also_throws() {
   host_settle();
 }
 
+// ---- regression 1's twin, on the event trampoline --------------------------
+
+// The trampoline dups its fn and widget for the duration of the call, for the
+// same reason the timer one does: a handler is allowed to destroy the widget it
+// is attached to, which fires LV_EVENT_DELETE and frees the binding holding the
+// last reference mid-call.
+//
+// Every name in kEvents is a code an input device raises, and the harness
+// registers none, so nothing a script can do from inside the VM reaches
+// event_trampoline. lv_obj_send_event() from here does, and it is not a
+// contrivance: it is the same entry point LVGL's own widgets use to raise an
+// event outside a touch, and lv_indev_active() being null is exactly what a
+// handler sees then. What this cannot reach is the other branch, fn(widget,x,y),
+// which needs a real indev to have a point to report.
+void event_trampoline_runs_the_handler() {
+  const char *kSrc = R"JS(
+    globalThis.clicks = 0;
+    globalThis.gotSelf = false;
+    const b = lv.button(lv.screen(), { text: "tap" });
+    b.on("click", (self) => { globalThis.clicks++; globalThis.gotSelf = (self === b); });
+  )JS";
+
+  check("ownership: click-handler script evaluates", run_script(kSrc));
+
+  lv_obj_t *btn = lv_obj_get_child(lv_screen_active(), 0);
+  check("ownership: the button is on the screen", btn != nullptr);
+  lv_obj_send_event(btn, LV_EVENT_CLICKED, nullptr);
+  host_settle();
+
+  // Exactly once, not merely non-zero, and both directions are reachable. Zero is
+  // what a trampoline that is never entered gives: that was this suite's state
+  // before this case existed. Above one is what a callback registered on both of
+  // event_send_core's passes would give, since it calls lv_event_send() twice and
+  // only the filter keeps a normal handler out of the first. check_printed matches
+  // the whole line, so clicks=1 cannot be satisfied by clicks=10.
+  const size_t mark = host_serial_mark();
+  jsvm_repl_line("console.log('clicks=' + globalThis.clicks)");
+  check_printed("ownership: a dispatched event calls the handler exactly once", mark,
+                "clicks", "1");
+
+  // The argument is the widget wrapper, not a fresh one: jsvm_bind_event dups the
+  // `this` of .on(), so identity holds. Without this the first assertion would
+  // pass on a trampoline that called fn with no arguments at all.
+  const size_t mark2 = host_serial_mark();
+  jsvm_repl_line("console.log('gotself=' + globalThis.gotSelf)");
+  check_printed("ownership: the handler receives its own widget", mark2, "gotself", "true");
+
+  jsvm_stop();
+  host_settle();
+}
+
+// The hazard the fn dup exists for. The handler cleans the screen it sits on, so
+// the button is deleted while LVGL is dispatching to it: event_delete_cb runs
+// event_unlink_and_free() on the binding whose fn is the closure currently
+// executing. That drops the closure's last reference, and QuickJS frees its
+// bytecode while the interpreter is still reading it — verified by deleting the
+// dup, which reports a heap-use-after-free in JS_CallInternal with
+// free_function_bytecode on the freeing stack. On hardware it was a
+// LoadProhibited panic. The widget dup is a separate question and not covered
+// here; see the case below.
+//
+// LVGL supports the shape (lv_event_send() backs up the event-list header before
+// iterating precisely so a callback may delete its own object), so a failure here
+// is ours rather than a misuse of the API.
+void a_handler_may_clean_its_own_screen() {
+  const char *kSrc = R"JS(
+    globalThis.ran = 0;
+    const b = lv.button(lv.screen(), { text: "self-destruct" });
+    b.on("click", () => { globalThis.ran++; lv.screen().clean(); });
+  )JS";
+
+  check("ownership: self-cleaning-handler script evaluates", run_script(kSrc));
+
+  lv_obj_t *btn = lv_obj_get_child(lv_screen_active(), 0);
+  check("ownership: the self-cleaning button is on the screen", btn != nullptr);
+  lv_obj_send_event(btn, LV_EVENT_CLICKED, nullptr);
+  host_settle();
+
+  const size_t mark = host_serial_mark();
+  jsvm_repl_line("console.log('ran=' + globalThis.ran)");
+  check_printed("ownership: a handler that cleans its own screen still completes", mark,
+                "ran", "1");
+
+  // And the widget really is gone, so the assertion above is about surviving the
+  // delete rather than about a clean() that quietly did nothing.
+  check_eq("ownership: the handler's clean() emptied the screen",
+           lv_obj_get_child_count(lv_screen_active()), 0u);
+
+  jsvm_stop();
+  host_settle();
+}
+
+// Regression 2's rule, on the event path: a handler that outlives its own widget
+// must get a TypeError from it, not a dangling lv_obj_t. The two cases above delete
+// the widget too, but neither touches it afterwards, so nothing there exercises
+// jsvm_arg_widget() from inside a live dispatch.
+//
+// What this deliberately does *not* prove is the trampoline's widget dup. Deleting
+// that dup leaves this passing, because `self.bounds()` throws either way: with the
+// dup the wrapper is alive holding a dead lv_obj_t and lv_obj_is_valid() rejects
+// it, without the dup JS_GetOpaque2 rejects it instead. Same observable from both,
+// so the assertion cannot tell them apart — see the limits list in
+// docs/host-test.md. The fn dup is covered, by the case above this one.
+//
+// One trap worth recording, since it cost a round: `typeof self` looks like it
+// touches the wrapper and does not. A JSValue carries its tag inline, so typeof
+// reads the stack copy and never dereferences the object. Calling a method does.
+void a_handler_whose_widget_is_unreferenced_by_script() {
+  const char *kSrc = R"JS(
+    globalThis.tag = "";
+    lv.button(lv.screen(), { text: "unheld" }).on("click", (self) => {
+      lv.screen().clean();
+      let threw = false;
+      try { self.bounds(); } catch (e) { threw = true; }
+      globalThis.tag = threw ? "threw" : "returned";
+    });
+  )JS";
+
+  check("ownership: unheld-widget script evaluates", run_script(kSrc));
+
+  lv_obj_t *btn = lv_obj_get_child(lv_screen_active(), 0);
+  check("ownership: the unheld button is on the screen", btn != nullptr);
+  lv_obj_send_event(btn, LV_EVENT_CLICKED, nullptr);
+  host_settle();
+
+  const size_t mark = host_serial_mark();
+  jsvm_repl_line("console.log('tag=' + globalThis.tag)");
+  check_printed("ownership: a handler touching its deleted widget gets a TypeError",
+                mark, "tag", "threw");
+
+  jsvm_stop();
+  host_settle();
+}
+
 // ---- the two release paths for event bindings ------------------------------
 
 // A handler on the screen object and a handler on a child are released by
@@ -232,6 +370,9 @@ int main() {
   stopping_one_timer_leaves_others();
   stale_handle_throws_rather_than_corrupting();
   stale_handle_read_also_throws();
+  event_trampoline_runs_the_handler();
+  a_handler_may_clean_its_own_screen();
+  a_handler_whose_widget_is_unreferenced_by_script();
   screen_and_child_handlers_both_release();
   deleting_a_widget_releases_all_its_handlers();
   timers_left_running_at_teardown_are_released();

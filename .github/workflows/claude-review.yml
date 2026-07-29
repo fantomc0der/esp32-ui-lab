@@ -73,8 +73,6 @@ jobs:
 
             The single most important thing to understand about this repo: CI cannot run the real functional test. `app/selftest.js` and `app/ui-selftest.js` execute on the physical ESP32-S3 panel and report over serial, so a hosted runner never runs them. CI proves that every board compiles, that scripts parse, and that scripts only call bindings the C layer registers. It proves nothing about runtime behaviour on the device. Weight your review accordingly: a change under `firmware/` is largely unverified by the checks that are about to go green, so scrutinise it far harder than a change under `tools/`.
 
-            The `host-test` job narrows that gap without closing it. It compiles `jsvm_core.cpp` and the `lv`/`sys`/`fs` bindings against Arduino stubs and runs them under AddressSanitizer, so a use-after-free or a JSValue leak in those files is caught here. It has no panel, no touch, no real PSRAM or DMA and no input device, so the display flush path, the byte-order pairing, the capability flags and the event trampoline's coordinate path remain untested by any automated check. `docs/host-test.md` lists the limits; treat a claim that something is "covered" as needing to survive that list.
-
             Focus on:
 
             - **Correctness and regressions**, especially anything CI cannot catch.
@@ -83,24 +81,15 @@ jobs:
             - **The platform/board seam.** `firmware/lvgl-js-bindings/` must not gain pin numbers, a resolution, or a panel name, and policy about running scripts belongs there rather than in a board sketch. Flag either direction of leakage.
             - **Generated files.** `app/apps/*.js`, `app/app.js` and `app/ui-selftest.js` are built from `app/src/*.jsx` and committed. A hand-edit to a generated file is a bug even when CI passes.
             - **Test coverage** for behaviour changes, given that on-hardware tests do not run in CI. A change to the binding layer that adds no case to `app/selftest.js` is worth flagging.
-            - **Tests that cannot fail.** The tests are this repo's only defence, so an assertion that passes for a reason other than the one it claims is a defect in the deliverable even when nothing that ships is wrong. Ask of every new or changed assertion: what one-line change to the code under test would make this fail? If the answer is "none", or if it is not the behaviour the test's name and comments describe, flag it. The shapes this repo has actually hit: asserting that a call did not throw, where the code ignores unrecognised input anyway; asserting a count of distinct results, which catches a dropped table entry but not two entries swapped; and a substring match that a longer value also satisfies.
             - **Docs prose is never hard-wrapped** — one continuous line per paragraph or list item.
 
             Use inline comments for specific code issues. Post exactly one top-level summary comment.
-
-            Separate what blocks the merge from what does not, and say which is which. A finding blocks if it is a defect in code or in a test's ability to fail. Prose that is imprecise but not wrong, a naming preference, or a suggestion for future work does not block: say it, mark it non-blocking, and let the verdict turn on the rest. Deciding this needs the whole picture, so make the blocking/non-blocking call for each finding in your summary comment, where you can see them together, rather than per inline comment.
-
-            State each finding as something that can be checked, not as a prediction dressed as a fact. If you assert that a specific edit leaves the suite green, or that a value comes out as N, you are claiming a result — say what you did to establish it (read the code path, ran it, reasoned from a table in the diff), or phrase it as the question it really is. A confidently wrong finding costs more than a hedged one, because it sends the author to verify a claim that was never true. If the author comes back with a measurement that contradicts you, that settles it: acknowledge it and drop the finding.
-
-            Aim to be exhaustive on the first pass. Re-reviews on later pushes should find things that were introduced or that you got wrong, not things you could have raised earlier — a long tail of rounds each surfacing one smaller item is a failure of the first pass, and the cost of it is real.
 
             The final line of your summary comment MUST be one of these verdicts, on its own line, with no surrounding punctuation or formatting:
             - `REVIEW: PASS` — the PR is ready to merge
             - `REVIEW: FAIL` — the PR needs changes before merge
 
-            Be strict about defects. If you found a bug, an invariant violation, a test that cannot fail for its stated reason, or a behaviour change to the binding layer with no corresponding selftest case, vote FAIL. When genuinely torn on a firmware change, vote FAIL: nothing here ships to users, a wrong FAIL costs one more push, and a wrong PASS merges code no test on this runner can catch.
-
-            Strict is not the same as withholding. If every blocking finding is resolved and what remains is non-blocking, vote PASS and keep the remarks — a PASS is not an endorsement of every line, and holding the gate shut over wording is how a review stops being useful. The verdict answers one question: is anything here wrong in a way that matters?
+            Be strict. If you found a bug, an invariant violation, or a behaviour change to the binding layer with no corresponding selftest case, vote FAIL. When genuinely torn on a firmware change, vote FAIL: nothing here ships to users, a wrong FAIL costs one more push, and a wrong PASS merges code no test on this runner can catch.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
@@ -126,16 +115,7 @@ jobs:
             echo "::error::Claude voted REVIEW: FAIL — see the review comment for details."
             exit 1
           fi
-          # No verdict is not a third outcome to interpret — it means the review did
-          # not happen, so the gate stays red. Worth distinguishing from a FAIL when
-          # reading it later: the action updates its sticky comment in place, so a
-          # crash overwrites the previous verdict and leaves nothing for the scrape
-          # above to find. That looks identical to a review that never ran, and it is
-          # not recoverable by re-running alone once the comment is gone. A run that
-          # ends in seconds having spent nothing never reached the model at all
-          # (exhausted token budget or an API-side failure); a run that ends after
-          # many turns crashed mid-review.
-          echo "::error::No verdict from Claude, so this PR is unreviewed. Check the action log rather than the PR comment: if the run was short and free, the review never started."
+          echo "::error::Claude did not post a recognized verdict. Check the review comment."
           exit 1
 
   arm-auto-merge:

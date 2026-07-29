@@ -9,6 +9,8 @@
 # 150 MB per sketch per board, and reproducible from source.
 build/
 
-# The host test build tree (firmware/host-test). Holds the fetched LVGL checkout
-# as well as objects, so it is large and entirely reproducible.
-.build/
+# The host test build tree. Holds the fetched LVGL checkout as well as objects,
+# so it is large and entirely reproducible. Anchored, unlike build/ above: that
+# one is per-board and appears in several places, this is the only .build/ there
+# is, and an unanchored pattern would silently swallow someone else's later.
+/firmware/host-test/.build/

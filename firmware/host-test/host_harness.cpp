@@ -78,11 +78,12 @@ void host_lvgl_begin() {
                          LV_DISPLAY_RENDER_MODE_PARTIAL);
 
   // No input device is registered, and that is a real limit rather than an
-  // oversight: without one, lv_indev_active() is always null, so the event
-  // trampoline takes its fn(widget) path and never the fn(widget, x, y) one.
-  // Synthesizing touch is possible (lv_indev_create with a read_cb) but would
-  // be inventing coordinates the panel never produced, so tests here stop at
-  // event registration exactly as app/selftest.js does. See docs/host-test.md.
+  // oversight: without one lv_indev_active() is always null, so the event
+  // trampoline's fn(widget, x, y) branch cannot be reached from here. Its
+  // fn(widget) branch can — lv_obj_send_event() takes it, which is how
+  // test_ownership covers the trampoline's dup pair. Synthesizing touch for the
+  // other branch is possible (lv_indev_create with a read_cb) but would be
+  // inventing coordinates the panel never produced. See docs/host-test.md.
 }
 
 void host_lvgl_end() {

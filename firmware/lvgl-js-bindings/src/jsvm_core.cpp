@@ -167,8 +167,11 @@ static void event_trampoline(lv_event_t *e) {
   JSValue fn = JS_DupValue(jsvm_ctx, b->fn);
   JSValue widget = JS_DupValue(jsvm_ctx, b->widget);
 
-  // Pointer events carry the touch point: fn(widget, x, y). Non-pointer
-  // dispatches (e.g. a value change set from code) just get fn(widget).
+  // While an input device is dispatching, the handler gets the current touch
+  // point: fn(widget, x, y). Anything raised outside that gets fn(widget).
+  // The test is the input device, not this event: a .value(n) call made from
+  // inside a click handler raises LV_EVENT_VALUE_CHANGED while the touch is
+  // still being dispatched, and that handler sees the click's coordinates.
   lv_indev_t *indev = lv_indev_active();
   if (indev) {
     lv_point_t pt;

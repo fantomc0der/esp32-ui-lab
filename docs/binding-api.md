@@ -108,7 +108,7 @@ Two things that stay in pixels no matter what:
 ### Widget methods
 
 - `.set(props)` — apply props, returns the widget (chainable)
-- `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`, `"press"`, `"longpress"`; returns the widget. When a pointer drove the event the callback is `fn(widget, x, y)` with the touch point in screen coordinates; otherwise just `fn(widget)`. `"longpress"` fires while the finger is still down, and LVGL still sends `"click"` when it lifts — a long-press gesture that must not also count as a tap has to claim the click itself, which is what [`app/app.js`](../app/app.js) does with a flag it clears on `"press"`
+- `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`, `"press"`, `"longpress"`; returns the widget. While an input device is dispatching, the callback is `fn(widget, x, y)` with the current touch point in screen coordinates; otherwise just `fn(widget)`. The coordinates come from the input device rather than from this event, so a `.value(n)` made inside a click handler raises a `"change"` that carries the click's coordinates — treat `x, y` as "where the finger is", not "where this event happened". `"longpress"` fires while the finger is still down, and LVGL still sends `"click"` when it lifts — a long-press gesture that must not also count as a tap has to claim the click itself, which is what [`app/app.js`](../app/app.js) does with a flag it clears on `"press"`
 - `.value()` / `.value(n)` — get/set for slider, bar, arc, switch, checkbox, led, and the two pickers (where it is the selected index, so a script indexes its own `options` array rather than parsing a string back)
 - `.add(text)` — lists only; returns the row's button handle
 - `.addTab(name)` — tabviews only; returns the tab's content container

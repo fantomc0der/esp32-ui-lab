@@ -245,21 +245,37 @@ void alignment_names_are_accepted() {
   // entry, because an unrecognised name leaves the child where an unaligned one
   // sits and so collides with whichever real name lands there. The box is much
   // larger than the child so the nine anchors cannot coincide for want of room.
+  //
+  // Distinctness alone would not catch a *permuted* table: swapping two codes
+  // leaves nine distinct positions and the count still reads 9. So the geometry
+  // is asserted alongside it, which pins the mapping rather than the cardinality
+  // — every top-* above every bottom-*, every *-left left of every *-right, and
+  // center strictly inside both.
   expect_output("props: every alignment name puts the widget somewhere different",
                 R"JS(
                   const box = lv.obj(lv.screen(), { w: 300, h: 150, pad: 0, border: 0 });
                   const names = ["center","top-left","top-mid","top-right",
                                  "bottom-left","bottom-mid","bottom-right",
                                  "left-mid","right-mid"];
-                  const seen = new Set();
+                  const at = {}, seen = new Set();
                   for (const a of names) {
-                    const b = lv.obj(box, { w: 20, h: 20, align: a });
-                    const r = b.bounds();
+                    const r = lv.obj(box, { w: 20, h: 20, align: a }).bounds();
+                    at[a] = r;
                     seen.add(r.x + ',' + r.y);
                   }
-                  console.log('distinct=' + seen.size);
+                  const hi = (ns, k) => Math.max(...ns.map(n => at[n][k]));
+                  const lo = (ns, k) => Math.min(...ns.map(n => at[n][k]));
+                  const tops = ["top-left","top-mid","top-right"];
+                  const bots = ["bottom-left","bottom-mid","bottom-right"];
+                  const lefts = ["top-left","bottom-left","left-mid"];
+                  const rights = ["top-right","bottom-right","right-mid"];
+                  const ordered = hi(tops,'y') < lo(bots,'y')
+                               && hi(lefts,'x') < lo(rights,'x')
+                               && at['center'].y > hi(tops,'y') && at['center'].y < lo(bots,'y')
+                               && at['center'].x > hi(lefts,'x') && at['center'].x < lo(rights,'x');
+                  console.log('aligns=' + seen.size + '/' + ordered);
                 )JS",
-                "distinct=9");
+                "aligns=9/true");
 
   // One name in that set is not actually covered, and it cannot be from here.
   // LV_ALIGN_TOP_LEFT puts a child exactly where an unaligned child already sits
@@ -305,46 +321,59 @@ void alignment_names_are_accepted() {
 
   // row-wrap and column-wrap differ from their unwrapped forms only once the
   // children overflow, so each gets its own case: enough children to force a
-  // second line, then assert one actually wrapped. Without both, one of the two
-  // wrap entries in kFlexFlows would be unasserted — a misspelling falls back to
-  // no flow at all, which apply_props does not report.
-  expect_output("props: row-wrap moves overflow onto a second line",
+  // second line, then assert where they actually went. Without both, one of the
+  // two wrap entries in kFlexFlows would be unasserted — a misspelling falls back
+  // to no flow at all, which apply_props does not report.
+  //
+  // "Something wrapped" is not enough to tell the two apart, which is the
+  // permutation gap the review named: six 30px children in a 100px box produce a
+  // 3x2 grid either way, so both flows put *some* child below the first and some
+  // child right of it. Measured, the discriminator is the second child —
+  // row-wrap gives 15:15 53:15 15:53 …, column-wrap gives 15:15 15:53 53:15 …,
+  // so a row fills across before wrapping down and a column the reverse. Each
+  // case asserts the grid formed *and* which way the fill ran, so swapping the
+  // two codes fails both.
+  expect_output("props: row-wrap fills across, then wraps onto a second line",
                 R"JS(
                   const box = lv.obj(lv.screen(), { w: 100, h: 100, pad: 0, border: 0,
                                                     flex: "row-wrap" });
                   const kids = [];
                   for (let i = 0; i < 6; i++) kids.push(lv.obj(box, { w: 30, h: 30 }));
-                  const first = kids[0].bounds();
-                  const wrapped = kids.map(k => k.bounds())
-                                      .some(b => b.x === first.x && b.y > first.y);
-                  console.log('wrapped=' + wrapped);
+                  const b = kids.map(k => k.bounds());
+                  const grid = b.some(r => r.x === b[0].x && r.y > b[0].y);
+                  const across = b[1].y === b[0].y && b[1].x > b[0].x;
+                  console.log('wrapped=' + (grid && across));
                 )JS",
                 "wrapped=true");
 
-  // The mirror, for the fourth entry. A plain column that overflows keeps
-  // stacking downward; column-wrap starts a second column, so some child shares
-  // the first child's y at a greater x. An unrecognised name leaves every child
-  // at the origin, which fails both halves.
-  expect_output("props: column-wrap moves overflow into a second column",
+  // The mirror, for the fourth entry. Same grid, filled the other way: the second
+  // child goes below the first and the wrap starts a new column to the right. An
+  // unrecognised name leaves every child at the origin, which fails both halves.
+  expect_output("props: column-wrap fills downward, then wraps into a second column",
                 R"JS(
                   const box = lv.obj(lv.screen(), { w: 100, h: 100, pad: 0, border: 0,
                                                     flex: "column-wrap" });
                   const kids = [];
                   for (let i = 0; i < 6; i++) kids.push(lv.obj(box, { w: 30, h: 30 }));
-                  const first = kids[0].bounds();
-                  const wrapped = kids.map(k => k.bounds())
-                                      .some(b => b.y === first.y && b.x > first.x);
-                  console.log('colwrapped=' + wrapped);
+                  const b = kids.map(k => k.bounds());
+                  const grid = b.some(r => r.y === b[0].y && r.x > b[0].x);
+                  const downward = b[1].x === b[0].x && b[1].y > b[0].y;
+                  console.log('colwrapped=' + (grid && downward));
                 )JS",
                 "colwrapped=true");
 
   // kFlexAligns, the sixth and last string→enum table in apply_props, and the
-  // one the review noted as unasserted. It is observable the same way: with a
-  // row narrower than its children need, the main-axis placement decides where
-  // the first child starts and where the gaps fall, so each of the six names
-  // must produce a distinct first-child x / gap pair. "start" is the table's
-  // default on no match, so it is the one name a misspelling is indistinguishable
-  // from — the same limit top-left has, and stated for the same reason.
+  // one the review noted as unasserted. The box is deliberately *wider* than its
+  // children need, and that free space is the mechanism: a main-axis placement
+  // decides how to distribute what is left over, so END starts at `free`, CENTER
+  // at free/2, BETWEEN spreads the gap to free/(n-1), AROUND to free/n/2 and
+  // EVENLY to free/(n+1). Measured, the three x positions per name are:
+  // start 15,53,91 / end 109,147,185 / center 62,100,138 / between 15,100,185 /
+  // around 30,99,168 / evenly 38,99,160. Six distinct triples.
+  //
+  // "start" is the value apply_props initialises place[] to before consulting the
+  // table, so it is the one name a misspelling is indistinguishable from — the
+  // same limit top-left has, and stated for the same reason.
   expect_output("props: every flexAlign name distributes children differently",
                 R"JS(
                   const names = ["start","end","center","between","around","evenly"];
@@ -360,6 +389,27 @@ void alignment_names_are_accepted() {
                   console.log('flexaligns=' + seen.size);
                 )JS",
                 "flexaligns=6");
+
+  // flexAlign takes two shapes, and the case above only ever passes a string, so
+  // only the JS_IsString(v) half of the fetch at bindings_lv.cpp:343-344 runs.
+  // The array form is the one every shipped app uses (app/apps/tasks.js) and the
+  // one docs/binding-api.md documents, and it is the half reaching
+  // JS_GetPropertyUint32 — a JSValue refcount pair inside a two-shape prop is
+  // exactly what this suite is for. The second element also decides both cross
+  // and track, since apply_props passes place[1] twice, and nothing else observes
+  // that: in a column, cross "end" pushes children to the right-hand edge where
+  // "start" leaves them at the left.
+  expect_output("props: flexAlign accepts the [main, cross] array form",
+                R"JS(
+                  const mk = (cross) => {
+                    const box = lv.obj(lv.screen(), { w: 120, h: 200, pad: 0, border: 0,
+                                                      flex: "column",
+                                                      flexAlign: ["start", cross] });
+                    return lv.obj(box, { w: 30, h: 20 }).bounds().x;
+                  };
+                  console.log('cross=' + (mk("end") > mk("start")));
+                )JS",
+                "cross=true");
 }
 
 // ---- the widget-kind guard --------------------------------------------------

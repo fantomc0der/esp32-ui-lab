@@ -304,9 +304,10 @@ void alignment_names_are_accepted() {
                 "flows=true");
 
   // row-wrap and column-wrap differ from their unwrapped forms only once the
-  // children overflow, so they get their own case: enough children to force a
-  // second line, then assert one actually wrapped back to the left and moved
-  // down. Without this the two wrap entries in kFlexFlows would be unasserted.
+  // children overflow, so each gets its own case: enough children to force a
+  // second line, then assert one actually wrapped. Without both, one of the two
+  // wrap entries in kFlexFlows would be unasserted — a misspelling falls back to
+  // no flow at all, which apply_props does not report.
   expect_output("props: row-wrap moves overflow onto a second line",
                 R"JS(
                   const box = lv.obj(lv.screen(), { w: 100, h: 100, pad: 0, border: 0,
@@ -319,6 +320,46 @@ void alignment_names_are_accepted() {
                   console.log('wrapped=' + wrapped);
                 )JS",
                 "wrapped=true");
+
+  // The mirror, for the fourth entry. A plain column that overflows keeps
+  // stacking downward; column-wrap starts a second column, so some child shares
+  // the first child's y at a greater x. An unrecognised name leaves every child
+  // at the origin, which fails both halves.
+  expect_output("props: column-wrap moves overflow into a second column",
+                R"JS(
+                  const box = lv.obj(lv.screen(), { w: 100, h: 100, pad: 0, border: 0,
+                                                    flex: "column-wrap" });
+                  const kids = [];
+                  for (let i = 0; i < 6; i++) kids.push(lv.obj(box, { w: 30, h: 30 }));
+                  const first = kids[0].bounds();
+                  const wrapped = kids.map(k => k.bounds())
+                                      .some(b => b.y === first.y && b.x > first.x);
+                  console.log('colwrapped=' + wrapped);
+                )JS",
+                "colwrapped=true");
+
+  // kFlexAligns, the sixth and last string→enum table in apply_props, and the
+  // one the review noted as unasserted. It is observable the same way: with a
+  // row narrower than its children need, the main-axis placement decides where
+  // the first child starts and where the gaps fall, so each of the six names
+  // must produce a distinct first-child x / gap pair. "start" is the table's
+  // default on no match, so it is the one name a misspelling is indistinguishable
+  // from — the same limit top-left has, and stated for the same reason.
+  expect_output("props: every flexAlign name distributes children differently",
+                R"JS(
+                  const names = ["start","end","center","between","around","evenly"];
+                  const seen = new Set();
+                  for (const a of names) {
+                    const box = lv.obj(lv.screen(), { w: 200, h: 40, pad: 0, border: 0,
+                                                      flex: "row", flexAlign: a });
+                    const k = [lv.obj(box, { w: 30, h: 20 }), lv.obj(box, { w: 30, h: 20 }),
+                               lv.obj(box, { w: 30, h: 20 })];
+                    const b = k.map(x => x.bounds());
+                    seen.add(b.map(r => r.x).join(','));
+                  }
+                  console.log('flexaligns=' + seen.size);
+                )JS",
+                "flexaligns=6");
 }
 
 // ---- the widget-kind guard --------------------------------------------------

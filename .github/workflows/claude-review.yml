@@ -1,0 +1,153 @@
+name: Claude PR Review
+
+# The review half of the PR automation. See docs/pr-automation.md for the whole picture.
+#
+# Two jobs, in order:
+#   review          - Claude reviews the diff and votes. Its pass/fail IS the gate,
+#                     because `review` is a required status check on main.
+#   arm-auto-merge  - only reachable when `review` succeeded; flips GitHub's own
+#                     auto-merge switch on the PR. It decides nothing.
+#
+# Everything that would otherwise be a hand-written gate (are all checks green, is
+# the head still current, is it a draft, is it still open) is left to GitHub's
+# native auto-merge, which already enforces the ruleset on main.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+jobs:
+  review:
+    # Named to sit alongside `scripts` and `firmware` in the ruleset's required checks.
+    name: review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      # A draft has not been reviewed, so this check must not be green. Guarding the
+      # whole job with `if: draft == false` looks tidier but publishes a `skipped`
+      # conclusion, and GitHub counts `skipped` as satisfying a required check: the
+      # PR reads CLEAN the instant it leaves draft, before any review has run on that
+      # SHA. Failing instead keeps `review` red until a real review turns it green.
+      #
+      # The later steps carry the implicit success() guard, so this failing ends the
+      # job; when the PR is not a draft this step is skipped and costs nothing.
+      # `synchronize` fires on pushes to drafts too, so this is reached often rather
+      # than only when a PR is opened.
+      - name: Refuse to pass on a draft
+        if: github.event.pull_request.draft == true
+        run: |
+          echo "::error::Draft PR, so nothing has reviewed this. Mark it ready for review."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Pinned rather than tracking @v1. A review action that silently starts
+      # failing takes the merge gate down with it, and this action has shipped at
+      # least one release that broke on a whole class of repo layout (v1.0.89
+      # crashed on any repo where CLAUDE.md or .claude/ is a git symlink, and
+      # stayed broken for weeks). Bumping is a deliberate one-line change: read
+      # the release notes, then move this pin.
+      #
+      # That particular bug cannot bite here, because this repo has no symlinks at
+      # all (`git ls-files -s | grep 120000` is empty). Worth keeping that way:
+      # it is also why .claude/skills/ holds real files rather than a symlink
+      # pointing somewhere else in the tree.
+      - uses: anthropics/claude-code-action@v1.0.183
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          base_branch: ${{ github.event.pull_request.base.ref }}
+          # track_progress is required for use_sticky_comment to work alongside `prompt`.
+          track_progress: true
+          use_sticky_comment: true
+          include_fix_links: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. Read CLAUDE.md first — it records invariants that are not obvious from the diff, and most real defects in this repo are violations of one of them.
+
+            The single most important thing to understand about this repo: CI cannot run the real functional test. `app/selftest.js` and `app/ui-selftest.js` execute on the physical ESP32-S3 panel and report over serial, so a hosted runner never runs them. CI proves that every board compiles, that scripts parse, and that scripts only call bindings the C layer registers. It proves nothing about runtime behaviour on the device. Weight your review accordingly: a change under `firmware/` is largely unverified by the checks that are about to go green, so scrutinise it far harder than a change under `tools/`.
+
+            Focus on:
+
+            - **Correctness and regressions**, especially anything CI cannot catch.
+            - **The invariants in CLAUDE.md.** In particular: the display flush swaps byte order exactly once (`lv_draw_sw_rgb565_swap()` paired with `draw16bitBeRGBBitmap()`); draw buffers size at 2 bytes/pixel explicitly and never `sizeof(lv_color_t)`; DMA buffers are `MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA` because SPI DMA cannot reach PSRAM; one FreeRTOS task owns LVGL and the JS VM, so there is no locking and nothing else may touch LVGL; the touch transform is a measured plain transpose and must not be "corrected" from MADCTL rotation bits.
+            - **JSValue ownership** in `firmware/lvgl-js-bindings/`: callbacks retained with `JS_DupValue` must be released exactly once, via an `LV_EVENT_DELETE` hook or `.stop()`. A leak or a double free here is the classic defect in this layer. Teardown order on reload is fixed: JS timers, then `lv_obj_clean(screen)`, then screen-level bindings, then the JS context, then the runtime.
+            - **The platform/board seam.** `firmware/lvgl-js-bindings/` must not gain pin numbers, a resolution, or a panel name, and policy about running scripts belongs there rather than in a board sketch. Flag either direction of leakage.
+            - **Generated files.** `app/apps/*.js`, `app/app.js` and `app/ui-selftest.js` are built from `app/src/*.jsx` and committed. A hand-edit to a generated file is a bug even when CI passes.
+            - **Test coverage** for behaviour changes, given that on-hardware tests do not run in CI. A change to the binding layer that adds no case to `app/selftest.js` is worth flagging.
+            - **Docs prose is never hard-wrapped** — one continuous line per paragraph or list item.
+
+            Use inline comments for specific code issues. Post exactly one top-level summary comment.
+
+            The final line of your summary comment MUST be one of these verdicts, on its own line, with no surrounding punctuation or formatting:
+            - `REVIEW: PASS` — the PR is ready to merge
+            - `REVIEW: FAIL` — the PR needs changes before merge
+
+            Be strict. If you found a bug, an invariant violation, or a behaviour change to the binding layer with no corresponding selftest case, vote FAIL. When genuinely torn on a firmware change, vote FAIL: nothing here ships to users, a wrong FAIL costs one more push, and a wrong PASS merges code no test on this runner can catch.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      # The action updates a sticky comment in place, so a FAIL verdict is otherwise
+      # invisible to the merge gate — the check would go green simply because the
+      # action did not error. This step is what turns the verdict into the job's
+      # conclusion, and therefore into the required check that blocks the merge.
+      - name: Reflect verdict as job status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          verdict=$(gh pr view "$PR" --repo "$REPO" --json comments \
+            --jq '[.comments[] | select(.body | test("REVIEW: (PASS|FAIL)"))] | last | .body' \
+            | grep -oE 'REVIEW: (PASS|FAIL)' | head -1 || echo "")
+          echo "Claude verdict: ${verdict:-(none)}"
+          if [ "$verdict" = "REVIEW: PASS" ]; then
+            exit 0
+          fi
+          if [ "$verdict" = "REVIEW: FAIL" ]; then
+            echo "::error::Claude voted REVIEW: FAIL — see the review comment for details."
+            exit 1
+          fi
+          echo "::error::Claude did not post a recognized verdict. Check the review comment."
+          exit 1
+
+  arm-auto-merge:
+    name: arm auto-merge
+    needs: review
+    # Explicit rather than relying on the implicit success() that `needs` provides,
+    # because it also states the draft case: a draft fails `review` above, so this
+    # resolves to 'failure' and the merge is never armed.
+    if: needs.review.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable auto-merge
+        env:
+          # Deliberately the PAT and not GITHUB_TOKEN. GitHub performs the merge
+          # later as whoever armed it, and a push to main authored by
+          # github-actions[bot] does not trigger workflows — ci.yml would never run
+          # on main again.
+          GH_TOKEN: ${{ secrets.PR_AUTOMATION_PAT }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          armed=$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest // empty')
+          if [ -n "$armed" ]; then
+            echo "Auto-merge is already enabled on this PR; nothing to do."
+            exit 0
+          fi
+          # This does not merge anything. It sets a flag, and GitHub merges once its
+          # own conditions hold: every required check green on the head SHA, not a
+          # draft, and the branch up to date with main (the ruleset is strict).
+          gh pr merge "$PR" --repo "$REPO" --squash --auto
+          echo "Auto-merge armed. GitHub will squash once the ruleset on main is satisfied."

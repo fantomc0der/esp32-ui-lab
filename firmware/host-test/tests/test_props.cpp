@@ -93,14 +93,16 @@ void size_parsing() {
   // board's real 320x172, so these numbers are the panel's numbers.
   // .bounds() reports the content area, so it is inset from the widget's own
   // width by padding and border. The assertion is therefore a relationship
-  // rather than an exact number: half's content box must be narrower than its
-  // parent's, and both positive.
+  // rather than an exact number, but it must be the *ratio* and not merely
+  // "narrower": dropping the LV_PCT() wrapper would resolve "50%" as 50 raw
+  // pixels, which is still positive and still narrower than the parent. Half of
+  // the parent's content width is a number only a real percentage produces.
   expect_output("props: a percentage width resolves against the parent",
                 R"JS(
-                  const box = lv.obj(lv.screen(), { w: "100%", h: 100, pad: 0 });
-                  const half = lv.obj(box, { w: "50%", h: 10, pad: 0 });
+                  const box = lv.obj(lv.screen(), { w: "100%", h: 100, pad: 0, border: 0 });
+                  const half = lv.obj(box, { w: "50%", h: 10, pad: 0, border: 0 });
                   const bb = box.bounds(), hb = half.bounds();
-                  console.log('halfw=' + (hb.w > 0 && hb.w < bb.w));
+                  console.log('halfw=' + (hb.w > 0 && hb.w === Math.floor(bb.w / 2)));
                 )JS",
                 "halfw=true");
 
@@ -168,12 +170,18 @@ void text_round_trips() {
 // ---- ranges and values ------------------------------------------------------
 
 void ranges_clamp() {
+  // The range must start above the default maximum of 100, or this case cannot
+  // fail for the reason it is named. lv_bar_set_range() clamps the current value
+  // into the new range, so with any range inside 0..100 both orders agree: apply
+  // value first and it survives set_range() untouched. Starting the range at 100
+  // separates them, because value-first clamps 150 to the default max of 100 and
+  // set_range() then keeps it at the bottom of the new range.
   expect_output("props: a slider range is applied before its value",
                 R"JS(
-                  const s = lv.slider(lv.screen(), { range: [10, 20], value: 15 });
+                  const s = lv.slider(lv.screen(), { range: [100, 200], value: 150 });
                   console.log('v=' + s.value());
                 )JS",
-                "v=15");
+                "v=150");
 
   // A value outside the range must clamp to the range, not wrap or pass through.
   expect_output("props: a value above the range clamps to its top",
@@ -183,12 +191,14 @@ void ranges_clamp() {
                 )JS",
                 "v=50");
 
+  // Same shape as the slider case above, and for the same reason: a range inside
+  // 0..100 would agree under either order.
   expect_output("props: a bar takes a range too",
                 R"JS(
-                  const b = lv.bar(lv.screen(), { range: [0, 10], value: 7 });
+                  const b = lv.bar(lv.screen(), { range: [400, 410], value: 407 });
                   console.log('v=' + b.value());
                 )JS",
-                "v=7");
+                "v=407");
 }
 
 // ---- unknown props and bad values ------------------------------------------
@@ -362,7 +372,7 @@ void alignment_names_are_accepted() {
                 )JS",
                 "colwrapped=true");
 
-  // kFlexAligns, the sixth and last string→enum table in apply_props, and the
+  // kFlexAligns, the third and last string→enum table in apply_props, and the
   // one the review noted as unasserted. The box is deliberately *wider* than its
   // children need, and that free space is the mechanism: a main-axis placement
   // decides how to distribute what is left over, so END starts at `free`, CENTER

@@ -1,6 +1,6 @@
 ---
 name: create-pull-request
-description: Create or update a pull request for the current branch using the gh CLI, with a thorough description focused on the MOTIVATION and APPROACH of the changes. Use when the user wants to open a PR for their current branch, asks to "make a PR", "open a PR", "create a pull request", "push this up for review", or asks to refresh an existing PR's description after more commits.
+description: Creates or updates a pull request for the current branch using the gh CLI, with a thorough description focused on the MOTIVATION and APPROACH of the changes. Use when the user wants to open a PR for their current branch, asks to "make a PR", "open a PR", "create a pull request", "push this up for review", or asks to refresh an existing PR's description after more commits.
 compatibility: Requires git and the gh CLI. Assumes gh is already installed and authenticated against the current repository.
 ---
 

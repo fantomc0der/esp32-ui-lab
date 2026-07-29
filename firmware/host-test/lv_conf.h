@@ -64,7 +64,8 @@
 //
 // What it buys is a backstop for the binding added later that forgets to validate.
 // Note what that backstop actually is, because it is not the assert: LV_ASSERT_OBJ
-// checks lv_obj_has_class() before lv_obj_is_valid() (lv_obj.h:481-486), and that
+// checks lv_obj_has_class() before lv_obj_is_valid() (see LV_ASSERT_OBJ in LVGL's
+// core/lv_obj.h; no line number, since LVGL is fetched and would renumber), and that
 // dereferences the pointer — so on a freed handle ASan reports the use-after-free
 // read from inside LVGL, and the assert never gets to run. The value here is
 // therefore a clear report at the first LVGL entry point rather than wherever the

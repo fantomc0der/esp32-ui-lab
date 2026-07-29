@@ -126,7 +126,7 @@ Paths are absolute. An unprefixed path uses the SD card, falling back to the fla
 
 ## fetch — HTTP
 
-`fetch(url)` returns a `Promise` resolving to `{ status, ok, body }`, where `body` is the raw text. It rejects on transport failure, and throws immediately if there is no connection or another request is already in flight (one at a time). HTTPS works, without certificate validation. Bodies are capped at 128 KB.
+`fetch(url)` returns a `Promise` resolving to `{ status, ok, body }`, where `body` is the raw text. It rejects on transport failure, and throws immediately if there is no connection or another request is already in flight (one at a time). "One at a time" spans app switches: an abandoned request keeps the radio until it times out, so the first `fetch()` of a freshly launched app can throw "the previous fetch is still finishing" and is worth retrying a second later. HTTPS works, without certificate validation. Bodies are capped at 128 KB.
 
 The request runs on a worker task, so a slow response never freezes rendering or touch, and your callback still arrives on the normal task like every other callback.
 

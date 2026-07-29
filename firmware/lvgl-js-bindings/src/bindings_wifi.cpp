@@ -307,6 +307,15 @@ static char g_fetch_url[512];
 // longer matches — which is why the worker never needs to be killed mid-flight.
 static uint32_t g_generation = 1;
 
+// Two different questions, which is why this is not g_fetch_busy. That one
+// means "a promise is waiting for a result" and is cleared by teardown, since
+// the promise dies with its context. This one means "a task is still inside a
+// request" and only the task can clear it. Abandoning a fetch does not stop the
+// worker — it is mid-handshake with a 10 second timeout — so without this an
+// app switch followed by an immediate fetch() would start a second worker while
+// the first is still using the network stack.
+static volatile bool g_fetch_worker_alive = false;
+
 static void fetch_release() {
   if (g_fetch_poll) { lv_timer_delete(g_fetch_poll); g_fetch_poll = nullptr; }
   if (!JS_IsUndefined(g_fetch_resolve)) JS_FreeValue(jsvm_ctx, g_fetch_resolve);
@@ -324,14 +333,18 @@ static void fetch_worker(void *arg) {
   if (r) {
     r->generation = generation;
     HTTPClient http;
+    // Owned by this worker and freed below, rather than a function-local
+    // static: a shared client would mean two workers driving one socket, with
+    // either one's http.end() closing it under the other.
+    NetworkClientSecure *tls = nullptr;
     bool begun;
     if (strncmp(g_fetch_url, "https:", 6) == 0) {
-      static NetworkClientSecure tls;
+      tls = new NetworkClientSecure();
       // No certificate store on the device, so this trusts the network it is
       // on — the same trust level as the plain-HTTP case, and appropriate for
       // a LAN gadget rather than anything handling secrets.
-      tls.setInsecure();
-      begun = http.begin(tls, g_fetch_url);
+      if (tls) tls->setInsecure();
+      begun = tls && http.begin(*tls, g_fetch_url);
     } else {
       begun = http.begin(g_fetch_url);
     }
@@ -355,12 +368,15 @@ static void fetch_worker(void *arg) {
       }
       http.end();
     }
+    delete tls;
 
     if (xQueueSend(g_fetch_q, &r, 0) != pdTRUE) {
       if (r->body) heap_caps_free(r->body);
       free(r);
     }
   }
+  // Last, and after the client is gone: this is what lets the next fetch start.
+  g_fetch_worker_alive = false;
   vTaskDelete(nullptr);
 }
 
@@ -409,6 +425,11 @@ static JSValue js_fetch(JSContext *ctx, JSValueConst, int argc, JSValueConst *ar
   if (argc < 1) return JS_ThrowTypeError(ctx, "fetch(url) needs a url");
   g_network_touched = true;
   if (g_fetch_busy) return JS_ThrowInternalError(ctx, "a fetch is already in flight");
+  // Reachable only right after an app switch, where the previous app's request
+  // was abandoned but its worker has not finished. Refusing is the honest
+  // answer: the radio is genuinely occupied, and a retry a moment later works.
+  if (g_fetch_worker_alive)
+    return JS_ThrowInternalError(ctx, "the previous fetch is still finishing");
   if (WiFi.status() != WL_CONNECTED) return JS_ThrowInternalError(ctx, "not connected to wifi");
 
   const char *url = JS_ToCString(ctx, argv[0]);
@@ -427,10 +448,15 @@ static JSValue js_fetch(JSContext *ctx, JSValueConst, int argc, JSValueConst *ar
   g_fetch_reject = funcs[1];
   g_fetch_busy = true;
 
+  // Set before the task exists, not inside it: the worker may not be scheduled
+  // before this function returns and the script calls fetch() again.
+  g_fetch_worker_alive = true;
+
   // TLS is the reason for the stack size; plain HTTP needs far less.
   if (xTaskCreate(fetch_worker, "jsfetch", 16384,
                   reinterpret_cast<void *>(static_cast<uintptr_t>(g_generation)),
                   tskIDLE_PRIORITY + 2, nullptr) != pdPASS) {
+    g_fetch_worker_alive = false;
     fetch_release();
     JS_FreeValue(ctx, promise);
     return JS_ThrowInternalError(ctx, "could not start the fetch task");
@@ -471,7 +497,9 @@ void js_teardown_wifi() {
   g_network_touched = false;
 
   // Abandon any in-flight fetch. The worker may still be running, so bump the
-  // generation instead of killing it: its result becomes a no-op.
+  // generation instead of killing it: its result becomes a no-op. It clears
+  // g_fetch_worker_alive when it finally exits, which is what keeps the next
+  // app from starting a second worker on top of it.
   if (g_fetch_busy) {
     g_generation++;
     fetch_release();

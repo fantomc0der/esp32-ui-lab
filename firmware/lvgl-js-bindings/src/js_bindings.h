@@ -43,7 +43,9 @@ bool jsvm_start(const char *src, const char *filename);
 // lv_timers first (they can re-enter the VM), then lv_obj_clean(screen) so the
 // LV_EVENT_DELETE hooks release per-widget callbacks while the context is
 // still alive, then any bindings left on the screen object itself, then the
-// context and runtime. Safe to call when nothing is running.
+// context and runtime. The screen is also reset to its theme defaults, so
+// nothing a script styled onto it outlives the script. Safe to call when
+// nothing is running.
 void jsvm_stop();
 
 bool jsvm_running();
@@ -131,6 +133,12 @@ bool jsvm_set_pinned_app(const char *path);
 // A sketch that wants its own answers to those questions can ignore all of this
 // and drive jsvm_start()/jsvm_stop()/jsvm_pump() directly.
 
+// jsvm_app_begin() copies this struct but not what its pointers point at, and
+// keeps the copy for the life of the board. Every pointer in it is borrowed:
+// the filesystems, and the two paths, which must be string literals or other
+// storage that outlives the call. A String's c_str() is the trap — it dangles
+// as soon as the String goes out of scope, and the supervisor then compares
+// and loads through it on every service pass.
 struct JsvmAppConfig {
   // Where scripts are read from. Unprefixed paths prefer `sd` and fall back to
   // `flash`; a "flash:" prefix always means `flash`. Either may be null. These
@@ -168,7 +176,9 @@ void jsvm_app_service();
 // Queues an app switch, performed on the next jsvm_app_service(). Switching is
 // never immediate: the caller is usually inside an LVGL callback or the REPL,
 // and tearing the context down there would free the code that is running.
-void jsvm_app_request(const char *path);
+// Returns false, having queued nothing and said so on Serial, for a path
+// longer than the 127 bytes the request buffer holds.
+bool jsvm_app_request(const char *path);
 
 // The script currently running, or null when only the built-in fallback is up.
 const char *jsvm_app_current();

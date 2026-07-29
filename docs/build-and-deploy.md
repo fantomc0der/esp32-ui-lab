@@ -92,7 +92,7 @@ While the firmware runs, the serial port accepts one line at a time:
 | `unpin` | back to booting the launcher |
 | `ls [dir]` | list a directory, default `/` |
 | `rm <path>` | delete a file |
-| `app-begin [path]` … `app-end` | receive a script and write it, then run it. With no path it replaces whatever is running, which is the usual edit loop; give a path to add a new app, e.g. `app-begin /apps/clock.js`. 256 KB cap |
+| `app-begin [path]` … `app-end` | receive a script and write it, then run it. With no path it replaces whatever is running, which is the usual edit loop; give a path to add a new app, e.g. `app-begin /apps/clock.js`. Lines are capped at 4 KB and the whole transfer at 256 KB, but the transfer buffer is internal RAM, so a large upload fails on allocation long before that. Any of the three aborts the upload rather than writing a truncated script |
 | anything else | evaluated as JavaScript in the running app; result or exception prints back |
 
 Paths are on the SD card, or on the flash partition with a `flash:` prefix.

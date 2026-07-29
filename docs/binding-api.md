@@ -108,7 +108,7 @@ Two things that stay in pixels no matter what:
 ### Widget methods
 
 - `.set(props)` — apply props, returns the widget (chainable)
-- `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`, `"press"`, `"longpress"`; returns the widget. When a pointer drove the event the callback is `fn(widget, x, y)` with the touch point in screen coordinates; otherwise just `fn(widget)`. `"longpress"` fires while the finger is still down, and LVGL still sends `"click"` when it lifts — a long-press gesture that must not also count as a tap has to claim the click itself, which is what [`app/app.js`](../app/app.js) does with a flag it clears on `"press"`
+- `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`, `"press"`, `"longpress"`; returns the widget. While an input device is dispatching, the callback is `fn(widget, x, y)` with the current touch point in screen coordinates; otherwise just `fn(widget)`. The coordinates come from the input device rather than from this event, so a `.value(n)` made inside a click handler raises a `"change"` that carries the click's coordinates — treat `x, y` as "where the finger is", not "where this event happened". `"longpress"` fires while the finger is still down, and LVGL still sends `"click"` when it lifts — a long-press gesture that must not also count as a tap has to claim the click itself, which is what [`app/app.js`](../app/app.js) does with a flag it clears on `"press"`
 - `.value()` / `.value(n)` — get/set for slider, bar, arc, switch, checkbox, led, and the two pickers (where it is the selected index, so a script indexes its own `options` array rather than parsing a string back)
 - `.add(text)` — lists only; returns the row's button handle
 - `.addTab(name)` — tabviews only; returns the tab's content container
@@ -126,7 +126,7 @@ Paths are absolute. An unprefixed path uses the SD card, falling back to the fla
 
 ## fetch — HTTP
 
-`fetch(url)` returns a `Promise` resolving to `{ status, ok, body }`, where `body` is the raw text. It rejects on transport failure, and throws immediately if there is no connection or another request is already in flight (one at a time). HTTPS works, without certificate validation. Bodies are capped at 128 KB.
+`fetch(url)` returns a `Promise` resolving to `{ status, ok, body }`, where `body` is the raw text. It rejects on transport failure, and throws immediately if there is no connection or another request is already in flight (one at a time). "One at a time" spans app switches: an abandoned request keeps the radio until it times out, so the first `fetch()` of a freshly launched app can throw "the previous fetch is still finishing" and is worth retrying a second later. HTTPS works, without certificate validation. Bodies are capped at 128 KB.
 
 The request runs on a worker task, so a slow response never freezes rendering or touch, and your callback still arrives on the normal task like every other callback.
 
@@ -152,7 +152,7 @@ Credentials are write-only by design: a script can set them but no API hands the
 - `sys.fps()` → panel flushes over the last 1 s window (host-measured)
 - `sys.backlight(pct)` → LEDC PWM, clamped 0–100, hardware floor keeps the panel faintly visible
 - `sys.info()` → `{ model, rev, cores, mhz, flashMB, psramMB, lvgl, quickjs }`
-- `sys.launch(path)` → asks the firmware to run a different script. It returns immediately and your app keeps running until the current call finishes; the switch happens after that. It cannot be synchronous, because tearing down the VM mid-call would free the function that is executing.
+- `sys.launch(path)` → asks the firmware to run a different script. It returns immediately and your app keeps running until the current call finishes; the switch happens after that. It cannot be synchronous, because tearing down the VM mid-call would free the function that is executing. Paths are limited to 127 bytes and a longer one throws a `RangeError` rather than being truncated into a request for some other file.
 - `sys.pin(path)` → makes that script the one the board boots into, instead of the launcher. Stored in NVS, so it survives reboots and reflashes. Returns `true` on success; throws on a relative path. It does not switch apps: pair it with `sys.launch(path)` if you want both. Any existing pin is replaced without warning, and the path is not checked for existence or against the launcher, so pinning is as permissive as the caller.
 - `sys.unpin()` → clears the pin; the launcher is the boot script again.
 - `sys.pinned()` → the pinned path, or `null`. The path is whatever was pinned, which may name a script that has since been deleted.

@@ -72,7 +72,7 @@ Adding a tag is a firmware change, not a runtime one: a tag is only a name for a
 
 ### Event props
 
-`onClick`, `onChange`, `onPress`, `onPressing`, `onLongPress`, `onReady`, `onCancel` — the seven `.on()` events. The handler receives one object: `{ target, type, x, y }`, plus `value` on a change event, where `target` is the widget handle and `x`/`y` are the touch point in screen coordinates when a pointer drove the event.
+`onClick`, `onChange`, `onPress`, `onPressing`, `onLongPress`, `onReady`, `onCancel` — the seven `.on()` events. The handler receives one object: `{ target, type, x, y }`, plus `value` on a change event, where `target` is the widget handle and `x`/`y` are the touch point in screen coordinates while an input device is dispatching (which includes a change raised from inside a click handler, since the finger is still down).
 
 Passing a fresh arrow function on every render is free and expected. The runtime registers one trampoline per widget per event and swaps the function it reads, so there is never a second `.on()` and never a stale closure.
 

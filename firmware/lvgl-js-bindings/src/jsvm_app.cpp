@@ -47,13 +47,33 @@ static char g_next_app[128] = "";
 
 // ---------------------------------------------------------------- script loading
 
-// Reads a whole file into a PSRAM buffer (caller frees). nullptr on any miss.
+// The same limit fs.read() enforces, for the same reason: past a certain size
+// a file is not a script, and the alternative to a cap is an allocation big
+// enough to fail. Without it a large file on the card arrived as "not found",
+// which points at the wrong problem entirely.
+static const size_t kMaxScript = 256 * 1024;
+
+// Reads a whole file into a PSRAM buffer (caller frees). nullptr on any miss —
+// silently for a file that simply isn't there, since the caller tries more than
+// one filesystem, but with a line of its own for a file that is there and
+// cannot be loaded.
 static char *readAll(fs::FS &fs, const char *path) {
   File f = fs.open(path, FILE_READ);
   if (!f || f.isDirectory()) return nullptr;
   const size_t n = f.size();
+  if (n > kMaxScript) {
+    Serial.printf("[app] %s is %u bytes, past the %u byte script limit\n", path, (unsigned)n,
+                  (unsigned)kMaxScript);
+    f.close();
+    return nullptr;
+  }
   char *buf = static_cast<char *>(heap_caps_malloc(n + 1, MALLOC_CAP_SPIRAM));
-  if (!buf) { f.close(); return nullptr; }
+  if (!buf) {
+    Serial.printf("[app] %s: no PSRAM for %u bytes (largest free block %u)\n", path,
+                  (unsigned)(n + 1), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+    f.close();
+    return nullptr;
+  }
   const size_t got = f.read(reinterpret_cast<uint8_t *>(buf), n);
   f.close();
   buf[got] = '\0';
@@ -82,9 +102,17 @@ static fs::FS *resolveFs(const char *path, const char **out_path) {
   return g_cfg.sd ? g_cfg.sd : g_cfg.flash;
 }
 
-void jsvm_app_request(const char *path) {
-  strncpy(g_next_app, path, sizeof(g_next_app) - 1);
-  g_next_app[sizeof(g_next_app) - 1] = '\0';
+bool jsvm_app_request(const char *path) {
+  // Refuse rather than truncate. A truncated path is a request for a file
+  // nobody asked for, and it comes back as "not found" against a path the user
+  // typed correctly. jsvm_set_pinned_app() answers the same question the same
+  // way.
+  if (strlen(path) >= sizeof(g_next_app)) {
+    Serial.printf("[app] path too long (max %u): %s\n", (unsigned)(sizeof(g_next_app) - 1), path);
+    return false;
+  }
+  strcpy(g_next_app, path);
+  return true;
 }
 
 const char *jsvm_app_current() { return g_current_app[0] ? g_current_app : nullptr; }
@@ -279,16 +307,37 @@ static void pollSerialRepl() {
   static String upload;
   static String upload_path;
   static bool uploading = false;
+  // Set when a line could not be stored in full, either because it passed the
+  // cap or because the String would not grow. Both are checked at the newline
+  // rather than here: what matters is that the line never reaches the REPL or
+  // the file, and that whoever sent it is told.
+  static bool line_lost = false;
   // Caps so a hostile/broken sender can't grow these Strings until the
-  // internal heap dies: REPL lines beyond 4 KB are discarded, uploads beyond
-  // 256 KB abort the transfer.
+  // internal heap dies: REPL lines beyond 4 KB are refused, uploads beyond
+  // 256 KB abort the transfer. Both Strings live in internal RAM, so an upload
+  // fails on allocation well before the 256 KB cap on this board; the cap is
+  // the backstop, the allocation check below is the real limit.
   constexpr size_t kMaxLine = 4 * 1024;
   constexpr size_t kMaxUpload = 256 * 1024;
   while (Serial.available()) {
     const char ch = static_cast<char>(Serial.read());
     if (ch == '\r') continue;
     if (ch != '\n') {
-      if (line.length() < kMaxLine) line += ch;
+      if (line.length() >= kMaxLine || !line.concat(ch)) line_lost = true;
+      continue;
+    }
+    // A partial line is not a line. Dropping the tail and carrying on used to
+    // write a corrupted script to the card and report success.
+    if (line_lost) {
+      line_lost = false;
+      if (uploading) {
+        uploading = false;
+        upload = "";
+        Serial.println("[app] upload aborted: a line was too long or memory ran out");
+      } else {
+        Serial.println("[app] line ignored: longer than the 4 KB cap");
+      }
+      line = "";
       continue;
     }
     if (uploading && upload.length() + line.length() > kMaxUpload) {
@@ -310,9 +359,13 @@ static void pollSerialRepl() {
           Serial.printf("[app] write to %s FAILED\n", upload_path.c_str());
           upload = "";
         }
-      } else {
-        upload += line;
-        upload += '\n';
+      } else if (!upload.concat(line) || !upload.concat('\n')) {
+        // Out of internal RAM. String's += reports this by quietly not
+        // growing, which would surface as a script that is missing a line
+        // somewhere in the middle and still gets written out.
+        uploading = false;
+        upload = "";
+        Serial.println("[app] upload aborted: out of memory");
       }
     } else if (line == "home") {
       jsvm_app_request(g_cfg.launcher);

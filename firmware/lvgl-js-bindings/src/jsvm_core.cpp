@@ -87,9 +87,10 @@ void jsvm_call_reporting(JSValue fn, int argc, JSValueConst *argv) {
 // is parked here and collected by the host from outside the VM.
 static char g_pending_launch[128];
 
-void jsvm_request_launch(const char *name) {
-  strncpy(g_pending_launch, name, sizeof(g_pending_launch) - 1);
-  g_pending_launch[sizeof(g_pending_launch) - 1] = '\0';
+bool jsvm_request_launch(const char *name) {
+  if (strlen(name) >= sizeof(g_pending_launch)) return false;
+  strcpy(g_pending_launch, name);
+  return true;
 }
 
 const char *jsvm_take_pending_launch() {
@@ -166,8 +167,11 @@ static void event_trampoline(lv_event_t *e) {
   JSValue fn = JS_DupValue(jsvm_ctx, b->fn);
   JSValue widget = JS_DupValue(jsvm_ctx, b->widget);
 
-  // Pointer events carry the touch point: fn(widget, x, y). Non-pointer
-  // dispatches (e.g. a value change set from code) just get fn(widget).
+  // While an input device is dispatching, the handler gets the current touch
+  // point: fn(widget, x, y). Anything raised outside that gets fn(widget).
+  // The test is the input device, not this event: a .value(n) call made from
+  // inside a click handler raises LV_EVENT_VALUE_CHANGED while the touch is
+  // still being dispatched, and that handler sees the click's coordinates.
   lv_indev_t *indev = lv_indev_active();
   if (indev) {
     lv_point_t pt;
@@ -381,7 +385,19 @@ void jsvm_stop() {
 
   // Deleting the widget tree fires LV_EVENT_DELETE, releasing per-widget
   // bindings while the context is still alive.
-  lv_obj_clean(lv_screen_active());
+  lv_obj_t *screen = lv_screen_active();
+  lv_obj_clean(screen);
+
+  // The screen object itself survives that, and lv.screen().set(...) writes
+  // local styles and flags straight onto it — a background colour, padding, a
+  // disabled scroll. Left in place they would show through the next app
+  // wherever it does not set the same thing. Strip them back to what a freshly
+  // created screen has: theme styles, and the flags lv_obj's constructor gives
+  // a parentless object.
+  lv_obj_remove_style_all(screen);
+  lv_theme_apply(screen);
+  lv_obj_add_flag(screen, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+  lv_obj_remove_flag(screen, LV_OBJ_FLAG_HIDDEN);
 
   // Whatever remains was bound to the screen object itself, which
   // lv_obj_clean() does not delete. Detach and release it explicitly.

@@ -70,15 +70,26 @@ void sys_backlight_clamps_and_reaches_the_host() {
   host_hooks_reset();
 
   // Clamping is documented as the binding's job, so the hook should only ever
-  // see 0..100 however the script misbehaves.
-  if (!run_script("sys.backlight(50); sys.backlight(999); sys.backlight(-40);")) {
+  // see 0..100 however the script misbehaves. Each bound is checked on its own
+  // rather than after a sequence, so the assertion cannot pass because some
+  // later call happened to leave the right value behind.
+  if (!run_script("sys.backlight(50);")) {
     bad("sys: backlight script evaluates", "evaluation threw");
   } else {
     ok("sys: backlight script evaluates");
-    check_eq("sys: backlight reached the host three times",
-             host_backlight_call_count(), 3);
-    check_eq("sys: a value above 100 clamps to 100", (int)host_backlight(), 0);
+    check_eq("sys: an in-range value passes through", (int)host_backlight(), 50);
+    check_eq("sys: backlight reached the host once", host_backlight_call_count(), 1);
   }
+  jsvm_stop();
+  host_settle();
+
+  run_script("sys.backlight(999);");
+  check_eq("sys: a value above 100 clamps to 100", (int)host_backlight(), 100);
+  jsvm_stop();
+  host_settle();
+
+  run_script("sys.backlight(-40);");
+  check_eq("sys: a negative value clamps to 0", (int)host_backlight(), 0);
   jsvm_stop();
   host_settle();
 }

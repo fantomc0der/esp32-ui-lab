@@ -381,7 +381,19 @@ void jsvm_stop() {
 
   // Deleting the widget tree fires LV_EVENT_DELETE, releasing per-widget
   // bindings while the context is still alive.
-  lv_obj_clean(lv_screen_active());
+  lv_obj_t *screen = lv_screen_active();
+  lv_obj_clean(screen);
+
+  // The screen object itself survives that, and lv.screen().set(...) writes
+  // local styles and flags straight onto it — a background colour, padding, a
+  // disabled scroll. Left in place they would show through the next app
+  // wherever it does not set the same thing. Strip them back to what a freshly
+  // created screen has: theme styles, and the flags lv_obj's constructor gives
+  // a parentless object.
+  lv_obj_remove_style_all(screen);
+  lv_theme_apply(screen);
+  lv_obj_add_flag(screen, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+  lv_obj_remove_flag(screen, LV_OBJ_FLAG_HIDDEN);
 
   // Whatever remains was bound to the screen object itself, which
   // lv_obj_clean() does not delete. Detach and release it explicitly.

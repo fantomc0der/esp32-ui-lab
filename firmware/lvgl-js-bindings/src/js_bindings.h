@@ -43,7 +43,9 @@ bool jsvm_start(const char *src, const char *filename);
 // lv_timers first (they can re-enter the VM), then lv_obj_clean(screen) so the
 // LV_EVENT_DELETE hooks release per-widget callbacks while the context is
 // still alive, then any bindings left on the screen object itself, then the
-// context and runtime. Safe to call when nothing is running.
+// context and runtime. The screen is also reset to its theme defaults, so
+// nothing a script styled onto it outlives the script. Safe to call when
+// nothing is running.
 void jsvm_stop();
 
 bool jsvm_running();

@@ -22,6 +22,7 @@ Organized by topic, roughly following the repo layout (see the [top-level README
 | [build-and-deploy.md](build-and-deploy.md) | Building the firmware (the --library flag), deploying app.js via SD card or serial, the REPL/upload serial commands, expected boot log |
 | [design-rationale.md](design-rationale.md) | Why this exists rather than lvgljs, what was kept from it, estimated vs actual cost, and how each predicted risk turned out |
 | [engine-notes.md](engine-notes.md) | QuickJS-ng on this board: spike measurements, the heap-poisoning/usable_size trap, the job pump, the Xtensa type patches, the DTR/RTS bootloader trap |
+| [host-test.md](host-test.md) | The host build of the C layer under AddressSanitizer: how to run it, which invariants it covers, what it cannot prove, and the two scope decisions (no supervisor, no Wi-Fi) |
 
 ## The hardware
 

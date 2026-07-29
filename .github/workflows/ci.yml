@@ -6,12 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
 
-# What CI can and cannot do here: the real test suite is app/selftest.js, which
-# runs on the board and talks over serial, so a hosted runner cannot execute it.
-# These jobs cover everything that does not need hardware — every board builds,
-# the frozen C dashboard still builds, and the scripts only call bindings that
-# exist. Running selftest.js needs a self-hosted runner with a board attached;
-# see docs/build-and-deploy.md for how it is driven.
+# What CI can and cannot do here. app/selftest.js remains the acceptance test and
+# runs on the board over serial, so a hosted runner cannot execute it — that needs
+# a self-hosted runner with a board attached; see docs/build-and-deploy.md.
+#
+# Short of that, three jobs: `scripts` checks everything about the JavaScript that
+# does not need a device, `firmware` proves every board still compiles, and
+# `host-test` compiles the binding layer for the runner and runs it under
+# AddressSanitizer, which is what catches the memory bugs that used to wait for
+# somebody to flash a board (docs/host-test.md). Nothing here touches the panel,
+# touch, PSRAM caps, SPI DMA or FreeRTOS behaviour.
 
 env:
   FQBN: "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc,FlashMode=qio,USBMode=hwcdc"
@@ -130,3 +134,39 @@ jobs:
       # bring-up, so it should not be allowed to rot silently.
       - name: Build the frozen C dashboard
         run: arduino-cli compile -b "$FQBN" experiments/c-dashboard/app
+
+  # The one job that executes the C layer rather than only compiling it. It runs
+  # the binding layer natively under AddressSanitizer and UndefinedBehaviorSanitizer,
+  # against stubs for the Arduino surface, so a use-after-free or a leak in the
+  # ownership rules fails here instead of on the next flash. Both of this repo's
+  # historical use-after-frees are regression cases in it.
+  #
+  # This is not a hardware test and cannot become one: no panel, no touch, no real
+  # PSRAM or DMA. See docs/host-test.md for exactly what it does and does not prove.
+  host-test:
+    name: host-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # LVGL is fetched by the build (pinned to the same 9.5.0 the firmware job
+      # installs through arduino-cli), so cache it rather than re-cloning.
+      - name: Cache the fetched LVGL
+        uses: actions/cache@v4
+        with:
+          path: firmware/host-test/.build/_deps
+          key: host-test-lvgl-9.5.0
+
+      - name: Configure
+        run: cmake -S firmware/host-test -B firmware/host-test/.build -G Ninja
+
+      - name: Build
+        run: cmake --build firmware/host-test/.build -j
+
+      # --output-on-failure so a sanitizer report reaches the log: the stack
+      # trace is the whole value of the job when something breaks.
+      - name: Run the suites under ASan
+        run: ctest --test-dir firmware/host-test/.build --output-on-failure

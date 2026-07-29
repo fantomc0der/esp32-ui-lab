@@ -109,7 +109,9 @@ Because `review` is a required check, this gate genuinely blocks: a PR cannot me
 
 ## What this does and does not protect against
 
-The load-bearing risk in this repo is specific and worth stating plainly: **CI cannot run the real tests.** `app/selftest.js` and `app/ui-selftest.js` execute on the panel and report over serial, so a hosted runner never runs them. A green `firmware` check means the code compiled, not that it works. Claude reviews what is visible in the diff. Neither catches a byte-order pairing that is now double-correcting, a `JS_DupValue` released twice on teardown, or a touch transform that is subtly wrong, because all three compile fine and all three need the board.
+The load-bearing risk in this repo is specific and worth stating plainly: **CI cannot run the acceptance tests.** `app/selftest.js` and `app/ui-selftest.js` execute on the panel and report over serial, so a hosted runner never runs them. A green `firmware` check means the code compiled, not that it works, and Claude reviews only what is visible in the diff.
+
+The `host-test` job narrows that gap for one specific class of bug: it executes the binding layer natively under AddressSanitizer, so a `JS_DupValue` released twice on teardown, or a stale widget handle written through, now fails on the runner ([host-test.md](host-test.md)). What it still cannot see is anything that needs the panel — a byte-order pairing that is now double-correcting, a touch transform that is subtly wrong, a buffer that no longer fits in DMA-capable RAM. Those compile fine, pass the sanitizers, and need the board.
 
 This is why the review prompt tells Claude to weight `firmware/` changes far more heavily than `tools/` changes, and to vote FAIL when genuinely torn on firmware: a wrong FAIL costs one more push, a wrong PASS merges code that nothing on the runner can catch. It is also why "the checks are green" should not be read as "this works" for any change to the binding layer or hardware glue. Those still need a flash and a look at the panel, and the automation does not change that. See [build-and-deploy.md](build-and-deploy.md) for the edit loop.
 

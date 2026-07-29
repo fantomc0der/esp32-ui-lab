@@ -8,3 +8,7 @@
 # is how the per-board build directories get made. Roughly
 # 150 MB per sketch per board, and reproducible from source.
 build/
+
+# The host test build tree (firmware/host-test). Holds the fetched LVGL checkout
+# as well as objects, so it is large and entirely reproducible.
+.build/

@@ -47,13 +47,33 @@ static char g_next_app[128] = "";
 
 // ---------------------------------------------------------------- script loading
 
-// Reads a whole file into a PSRAM buffer (caller frees). nullptr on any miss.
+// The same limit fs.read() enforces, for the same reason: past a certain size
+// a file is not a script, and the alternative to a cap is an allocation big
+// enough to fail. Without it a large file on the card arrived as "not found",
+// which points at the wrong problem entirely.
+static const size_t kMaxScript = 256 * 1024;
+
+// Reads a whole file into a PSRAM buffer (caller frees). nullptr on any miss —
+// silently for a file that simply isn't there, since the caller tries more than
+// one filesystem, but with a line of its own for a file that is there and
+// cannot be loaded.
 static char *readAll(fs::FS &fs, const char *path) {
   File f = fs.open(path, FILE_READ);
   if (!f || f.isDirectory()) return nullptr;
   const size_t n = f.size();
+  if (n > kMaxScript) {
+    Serial.printf("[app] %s is %u bytes, past the %u byte script limit\n", path, (unsigned)n,
+                  (unsigned)kMaxScript);
+    f.close();
+    return nullptr;
+  }
   char *buf = static_cast<char *>(heap_caps_malloc(n + 1, MALLOC_CAP_SPIRAM));
-  if (!buf) { f.close(); return nullptr; }
+  if (!buf) {
+    Serial.printf("[app] %s: no PSRAM for %u bytes (largest free block %u)\n", path,
+                  (unsigned)(n + 1), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+    f.close();
+    return nullptr;
+  }
   const size_t got = f.read(reinterpret_cast<uint8_t *>(buf), n);
   f.close();
   buf[got] = '\0';

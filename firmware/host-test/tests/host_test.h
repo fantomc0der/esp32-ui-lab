@@ -52,10 +52,18 @@ inline void check_eq(const char *name, A got, B want) {
 // starting that way.
 //
 // This exists because a plain substring search is a trap for numeric results:
-// "b=1" is a prefix of "b=10", so a test asserting a timer fired once passed
-// while it was firing ten times. Every count assertion goes through here, which
-// prints a newline-delimited line and matches the delimiter too, so no value can
-// satisfy an assertion meant for a different one.
+// "b=1" is a prefix of "b=10", so a test asserting a timer fired once passed while
+// it was firing ten times. Matching the trailing newline closes that: no value can
+// satisfy an assertion meant for a longer one.
+//
+// Only the right edge is anchored, so "b=1\n" would also be satisfied by a line
+// ending "ab=1". Nothing in the suites collides that way, and anchoring the left
+// edge with a leading newline is not safe here — jsvm_report_exception() prints a
+// stack trace with no trailing newline, so a line is not guaranteed to start after
+// one. Keep keys distinct rather than relying on the match to separate them.
+//
+// Use this for a value read back through the REPL; expect_output() does the same
+// matching for one a script printed as it ran.
 inline void check_printed(const char *name, size_t mark, const char *key,
                           const char *value) {
   const std::string want = std::string(key) + "=" + value + "\n";

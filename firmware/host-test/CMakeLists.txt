@@ -136,6 +136,10 @@ enable_testing()
 foreach(suite test_ownership test_props test_reload test_modules)
   add_executable(${suite} tests/${suite}.cpp)
   target_link_libraries(${suite} PRIVATE host_bindings)
+  # The suites need the warning flags too: host_bindings sets them PRIVATE, so
+  # they do not propagate, and test code that nothing checks is how a suite ends
+  # up asserting something other than what it reads as asserting.
+  target_compile_options(${suite} PRIVATE -Wall -Wextra -Wno-unused-parameter)
   add_test(NAME ${suite} COMMAND ${suite})
   # halt_on_error keeps the first report as the failure rather than letting a
   # cascade bury it; detect_leaks is the point of the reload suite.

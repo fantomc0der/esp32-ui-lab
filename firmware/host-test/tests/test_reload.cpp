@@ -20,11 +20,18 @@
 //                           197 and 253), so this is the only check that sees those
 //                           structs leak.
 //
-// The gap worth naming: a binding left linked on g_events at teardown is both
-// malloc-side (invisible to the counters) and still reachable from a global (so
-// LSan does not call it a leak). Neither check catches that directly. What does
-// catch it is the JSValues it still holds, which the counters do see — which is
-// why the assertion below is on bytes and blocks rather than on the list itself.
+// Two gaps worth naming, since a green run here is not "nothing leaked":
+//
+//   A binding left linked on g_events at teardown is both malloc-side (invisible
+//   to the counters) and still reachable from a global (so LSan does not call it a
+//   leak). What catches that one indirectly is the JSValues it still holds, which
+//   the counters do see — hence the assertions below being on bytes and blocks.
+//
+//   An LVGL object left attached to the display is invisible to both, for the same
+//   pair of reasons: under LV_STDLIB_CLIB, LVGL allocates through plain malloc
+//   rather than the shim, and a widget still parented to a live display is
+//   reachable at exit. So a leak on the LVGL side rather than the JS side is not
+//   something this suite reports.
 
 #include "host_test.h"
 

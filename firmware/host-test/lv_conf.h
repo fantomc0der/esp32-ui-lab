@@ -60,10 +60,16 @@
 //
 // It does NOT add coverage for the stale-handle cases in test_ownership: those
 // return a TypeError from jsvm_arg_widget()'s lv_obj_is_valid() check before LVGL
-// is handed the object at all, so no LV_ASSERT_OBJ is reachable on that path. What
-// it buys is a backstop for the binding added later that forgets to validate —
-// LVGL would then abort with a diagnostic on the spot rather than waiting for ASan
-// to notice the memory being reused.
+// is handed the object at all, so no LV_ASSERT_OBJ is reachable on that path.
+//
+// What it buys is a backstop for the binding added later that forgets to validate.
+// Note what that backstop actually is, because it is not the assert: LV_ASSERT_OBJ
+// checks lv_obj_has_class() before lv_obj_is_valid() (lv_obj.h:481-486), and that
+// dereferences the pointer — so on a freed handle ASan reports the use-after-free
+// read from inside LVGL, and the assert never gets to run. The value here is
+// therefore a clear report at the first LVGL entry point rather than wherever the
+// freed memory is next touched; on a type mismatch that is still live memory, the
+// assert itself fires and names the problem.
 #undef LV_USE_ASSERT_OBJ
 #define LV_USE_ASSERT_OBJ 1
 

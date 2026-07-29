@@ -63,13 +63,29 @@ void sys_backlight_clamps_and_reaches_the_host() {
   jsvm_stop();
   host_settle();
 
-  run_script("sys.backlight(999);");
-  check_eq("sys: a value above 100 clamps to 100", (int)host_backlight(), 100);
+  // Each clamp case starts from a resting value that is NOT the bound it expects,
+  // and counts the calls, so it cannot pass on a leftover value or on a script that
+  // threw before reaching sys.backlight(). host_hooks_reset() rests at 100, which is
+  // one of the bounds under test, so the upper case is seeded away from it first.
+  host_hooks_reset();
+  if (!run_script("sys.backlight(10); sys.backlight(999);")) {
+    bad("sys: upper-clamp script evaluates", "evaluation threw");
+  } else {
+    ok("sys: upper-clamp script evaluates");
+    check_eq("sys: both calls reached the host", host_backlight_call_count(), 2);
+    check_eq("sys: a value above 100 clamps to 100", (int)host_backlight(), 100);
+  }
   jsvm_stop();
   host_settle();
 
-  run_script("sys.backlight(-40);");
-  check_eq("sys: a negative value clamps to 0", (int)host_backlight(), 0);
+  host_hooks_reset();
+  if (!run_script("sys.backlight(-40);")) {
+    bad("sys: lower-clamp script evaluates", "evaluation threw");
+  } else {
+    ok("sys: lower-clamp script evaluates");
+    check_eq("sys: the call reached the host", host_backlight_call_count(), 1);
+    check_eq("sys: a negative value clamps to 0", (int)host_backlight(), 0);
+  }
   jsvm_stop();
   host_settle();
 }

@@ -18,6 +18,22 @@ so that the required checks read `scripts`, `firmware`, `review`. The context na
 
 Everything else is already in place: the ruleset exists and is active, `allow_auto_merge` and `delete_branch_on_merge` are on, squash merging is allowed, and both secrets are set.
 
+## A PR that changes the review workflow cannot be reviewed
+
+The action refuses to run when `claude-review.yml` on the PR branch differs from the copy on the default branch:
+
+> Workflow validation failed. The workflow file must exist and have identical content to the version on the repository's default branch.
+
+This is a security control rather than a bug, and it is the right one. Without it, any PR could rewrite the review workflow to dump `ANTHROPIC_API_KEY` and `PR_AUTOMATION_PAT` into a log, and the review would happily run the attacker's version of itself. The check exists precisely so that the workflow reviewing a diff is the workflow `main` already trusts.
+
+Two consequences, one temporary and one permanent.
+
+**Bootstrapping.** The PR that introduces this automation cannot be reviewed by it, because the workflow does not yet exist on `main`. The action skips, no verdict comment is posted, and the verdict step fails closed, so `review` goes red and the PR is blocked by the very check it is adding. Break the cycle by removing `review` from the ruleset's required checks, merging, and adding it straight back. Once the workflow is on `main`, every later PR reviews normally.
+
+**Editing the review workflow later.** Any PR that touches `claude-review.yml` hits the same wall, permanently. Expect it, and use the same temporary removal. Prefer to keep such PRs small and separate from functional changes, since the diff genuinely goes unreviewed.
+
+Note that the verdict step failing closed is what makes this visible rather than dangerous. A skipped action posts no verdict, "no recognized verdict" is treated as a failure, and the check goes red. The alternative, treating a missing verdict as a pass, would mean a PR editing the review workflow merges unreviewed, which is exactly the attack the validation exists to stop.
+
 ## The happy path
 
 1. Create a branch, commit, push. Open a pull request against `main`. Open it as a **draft** if it isn't finished: `gh pr create --draft`.
@@ -66,9 +82,15 @@ It exists in repos with no branch protection, where a workflow genuinely is the 
 
 There is no `enforce-draft.yml` either. Its job was to convert every new PR to a draft so reviews never fired on unfinished work. Opening the PR as a draft yourself does the same thing without a workflow, a PAT permission, a GraphQL mutation, and a bot comment on every PR. It also removes a race: because that workflow and the review workflow both fire from `opened` and both see the same frozen event payload, the review had to be barred from triggering on `opened` at all to avoid reviewing a PR that was about to become a draft. Without it, `opened` is safe to review on, so a PR opened ready gets reviewed immediately instead of waiting for a click.
 
-## Two sharp edges
+## Three sharp edges
 
 **Auto-merge does not update the branch.** The ruleset sets `strict_required_status_checks_policy`, meaning a PR must be up to date with `main` before merging. GitHub's auto-merge honours that but will not update the branch for you, so if `main` moves while a PR waits, the PR sits armed and unmerged until you update it. With serial one-at-a-time PRs this never comes up. If it starts happening, the fix is to turn strictness off in the ruleset rather than to add a workflow that pushes merges into branches.
+
+**A skipped `review` satisfies the required check.** Measured on PR #19, not assumed: with `review` required and only a draft-phase skip recorded on the head SHA, GitHub reports the PR as `CLEAN` and `MERGEABLE` the moment it leaves draft, before any review has run. Skipping a job still publishes a check run, and a `skipped` conclusion counts as success.
+
+This does not let anything merge unreviewed on the normal path, because arming is gated on a review that actually succeeded, so the flag is never set during that window. It does mean the required check is weaker than it looks: a merge performed by any other route in that window would go through. The window is not only the seconds after clicking Ready. A PR that was armed, converted back to draft, pushed, and marked ready again carries a fresh skipped `review` on the new SHA that reads as green.
+
+If that matters more than clean-looking drafts, the fix is to make the draft case *fail* rather than skip, so `review` is red until a real review turns it green. The cost is a red X on every draft, which is honest (nothing has reviewed it) but noisy.
 
 **Arming happens after the review, not alongside it.** This is why `arm-auto-merge` lives inside `claude-review.yml` behind `needs: review` rather than in its own workflow triggered by `ready_for_review`. Marking a PR ready does not change the head SHA, and required checks are evaluated per SHA, so a `review` check left over from the draft phase would still be the current one at that instant. A separate arming workflow firing on the same event would race the review it is supposed to be waiting for, and could arm against a stale result. Making arming a downstream job of the review removes the race by construction: there is no moment at which the merge is armed and the review has not run on that exact commit.
 

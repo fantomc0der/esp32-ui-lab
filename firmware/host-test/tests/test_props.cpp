@@ -58,11 +58,13 @@ void options_and_value_in_one_call() {
 // ---- colours ----------------------------------------------------------------
 
 void colour_parsing() {
-  // A hex string with and without the leading '#', and a plain number, must all
-  // reach the same colour. There is no getter for a style colour, so this
-  // asserts the parse does not throw and the widget survives it; the value
-  // itself is covered by the board's own eyes. Stated plainly rather than
-  // pretending to check more than it does.
+  // A hex string with and without the leading '#', and a plain number, are all
+  // accepted forms. Be clear about how little this proves: the binding exposes no
+  // style getter, so nothing here can read a colour back, and these cases assert
+  // only that the three forms parse without throwing and leave a live widget.
+  // Measured, not assumed — making parse_color() return false unconditionally
+  // leaves both cases below passing. The colours themselves are verified by
+  // looking at the panel, and docs/host-test.md says so.
   expect_output("props: colours parse in every accepted form",
                 R"JS(
                   const scr = lv.screen();

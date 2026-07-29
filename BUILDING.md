@@ -45,7 +45,7 @@ One firmware image containing the whole dashboard, with no scripting; changing t
 
 ## CI
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) compiles every board in `firmware/boards/` plus the frozen C dashboard on each push and pull request, using the same pinned versions listed above, and checks the JavaScript: every script is syntax-checked, and [`tools/check-js-api.mjs`](tools/check-js-api.mjs) fails the build if a script calls a binding the C layer doesn't actually register — the mistake that would otherwise only surface on the device.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) compiles every board in `firmware/boards/` plus the frozen C dashboard on each push and pull request, using the same pinned versions listed above, and checks the JavaScript: every script is syntax-checked, and [`tools/check-js-api.mjs`](tools/check-js-api.mjs) fails the build if a script calls a binding the C layer doesn't actually register, or calls a widget method on a kind of widget that doesn't have it (`lv.label(p, {}).push(3)`) — the mistakes that would otherwise only surface on the device.
 
 What CI cannot do is run the real test suite. [`app/selftest.js`](app/selftest.js) executes on the board and reports over serial, so it needs hardware; a hosted runner has none. Run it yourself after any change to the binding layer (see [`docs/build-and-deploy.md`](docs/build-and-deploy.md)), or attach a board to a self-hosted runner if you want it automated.
 

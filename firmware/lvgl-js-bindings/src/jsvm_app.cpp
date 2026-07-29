@@ -279,16 +279,37 @@ static void pollSerialRepl() {
   static String upload;
   static String upload_path;
   static bool uploading = false;
+  // Set when a line could not be stored in full, either because it passed the
+  // cap or because the String would not grow. Both are checked at the newline
+  // rather than here: what matters is that the line never reaches the REPL or
+  // the file, and that whoever sent it is told.
+  static bool line_lost = false;
   // Caps so a hostile/broken sender can't grow these Strings until the
-  // internal heap dies: REPL lines beyond 4 KB are discarded, uploads beyond
-  // 256 KB abort the transfer.
+  // internal heap dies: REPL lines beyond 4 KB are refused, uploads beyond
+  // 256 KB abort the transfer. Both Strings live in internal RAM, so an upload
+  // fails on allocation well before the 256 KB cap on this board; the cap is
+  // the backstop, the allocation check below is the real limit.
   constexpr size_t kMaxLine = 4 * 1024;
   constexpr size_t kMaxUpload = 256 * 1024;
   while (Serial.available()) {
     const char ch = static_cast<char>(Serial.read());
     if (ch == '\r') continue;
     if (ch != '\n') {
-      if (line.length() < kMaxLine) line += ch;
+      if (line.length() >= kMaxLine || !line.concat(ch)) line_lost = true;
+      continue;
+    }
+    // A partial line is not a line. Dropping the tail and carrying on used to
+    // write a corrupted script to the card and report success.
+    if (line_lost) {
+      line_lost = false;
+      if (uploading) {
+        uploading = false;
+        upload = "";
+        Serial.println("[app] upload aborted: a line was too long or memory ran out");
+      } else {
+        Serial.println("[app] line ignored: longer than the 4 KB cap");
+      }
+      line = "";
       continue;
     }
     if (uploading && upload.length() + line.length() > kMaxUpload) {
@@ -310,9 +331,13 @@ static void pollSerialRepl() {
           Serial.printf("[app] write to %s FAILED\n", upload_path.c_str());
           upload = "";
         }
-      } else {
-        upload += line;
-        upload += '\n';
+      } else if (!upload.concat(line) || !upload.concat('\n')) {
+        // Out of internal RAM. String's += reports this by quietly not
+        // growing, which would surface as a script that is missing a line
+        // somewhere in the middle and still gets written out.
+        uploading = false;
+        upload = "";
+        Serial.println("[app] upload aborted: out of memory");
       }
     } else if (line == "home") {
       jsvm_app_request(g_cfg.launcher);

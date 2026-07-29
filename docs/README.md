@@ -9,6 +9,7 @@ Organized by topic, roughly following the repo layout (see the [top-level README
 | Doc | What's in it |
 |---|---|
 | [architecture.md](architecture.md) | How the repo fits together: the platform/board seam, the shared display and touch stack, the single-task rule, and the constraints that shaped everything |
+| [pr-automation.md](pr-automation.md) | How a change gets from a branch to `main`: the review workflow, why the merge gate is the ruleset rather than a workflow, and what green checks do not prove here |
 
 ## The platform
 

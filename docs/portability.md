@@ -71,6 +71,8 @@ jsvm_app_begin(cfg);              // in setup(), after LVGL and storage
 jsvm_app_service();               // in loop(), after lv_timer_handler()
 ```
 
+One rule about that struct: everything in it is borrowed. `jsvm_app_begin()` copies the struct and keeps it forever, but not what the pointers point at, so the two paths have to be literals or other storage that outlives the call — a `String`'s `c_str()` dangles the moment the `String` does, and the supervisor reads through those pointers on every service pass.
+
 So a whole board sketch is: bring LVGL up however the hardware requires, implement three hooks, fill in that struct, and call two functions. This board's is 189 lines, and roughly 70 of them are the display stack.
 
 The supervisor is opt-in. A product that wants its own boot rules, no corner button, or a different serial protocol skips `jsvm_app_begin()` entirely and drives `jsvm_start()`, `jsvm_stop()` and `jsvm_pump()` itself; that is the interface the supervisor is written against, with no privileged access.

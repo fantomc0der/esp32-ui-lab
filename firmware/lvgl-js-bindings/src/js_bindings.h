@@ -133,6 +133,12 @@ bool jsvm_set_pinned_app(const char *path);
 // A sketch that wants its own answers to those questions can ignore all of this
 // and drive jsvm_start()/jsvm_stop()/jsvm_pump() directly.
 
+// jsvm_app_begin() copies this struct but not what its pointers point at, and
+// keeps the copy for the life of the board. Every pointer in it is borrowed:
+// the filesystems, and the two paths, which must be string literals or other
+// storage that outlives the call. A String's c_str() is the trap — it dangles
+// as soon as the String goes out of scope, and the supervisor then compares
+// and loads through it on every service pass.
 struct JsvmAppConfig {
   // Where scripts are read from. Unprefixed paths prefer `sd` and fall back to
   // `flash`; a "flash:" prefix always means `flash`. Either may be null. These

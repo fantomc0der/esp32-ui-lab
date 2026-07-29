@@ -4,36 +4,6 @@ Solo-dev workflow where Claude reviews every pull request and GitHub squash-merg
 
 The design principle here is that **the gate is the ruleset on `main`, not a workflow**. This repo already protects `main` with required status checks, so Claude's verdict is enforced the same way `scripts` and `firmware` are: it is just another required check. Nothing in `.github/workflows/` decides whether a PR may merge. That decision belongs to GitHub, which already does it correctly, and the workflows here only produce the signals it gates on.
 
-## Manual setup step
-
-**This automation does not actually gate on Claude until you add one required status check.** Until then a `REVIEW: FAIL` turns the check red and the PR still merges on CI alone.
-
-Go to **Settings → Rules → Rulesets → `main` → Require status checks to pass**, and add:
-
-```
-review
-```
-
-so that the required checks read `scripts`, `firmware`, `review`. The context name is the *job* name (`jobs.review.name` in `claude-review.yml`), not the workflow name, which is why it is lowercase and matches the style of the two existing checks.
-
-Everything else is already in place: the ruleset exists and is active, `allow_auto_merge` and `delete_branch_on_merge` are on, squash merging is allowed, and both secrets are set.
-
-## A PR that changes the review workflow cannot be reviewed
-
-The action refuses to run when `claude-review.yml` on the PR branch differs from the copy on the default branch:
-
-> Workflow validation failed. The workflow file must exist and have identical content to the version on the repository's default branch.
-
-This is a security control rather than a bug, and it is the right one. Without it, any PR could rewrite the review workflow to dump `ANTHROPIC_API_KEY` and `PR_AUTOMATION_PAT` into a log, and the review would happily run the attacker's version of itself. The check exists precisely so that the workflow reviewing a diff is the workflow `main` already trusts.
-
-Two consequences, one temporary and one permanent.
-
-**Bootstrapping.** The PR that introduces this automation cannot be reviewed by it, because the workflow does not yet exist on `main`. The action skips, no verdict comment is posted, and the verdict step fails closed, so `review` goes red and the PR is blocked by the very check it is adding. Break the cycle by removing `review` from the ruleset's required checks, merging, and adding it straight back. Once the workflow is on `main`, every later PR reviews normally.
-
-**Editing the review workflow later.** Any PR that touches `claude-review.yml` hits the same wall, permanently. Expect it, and use the same temporary removal. Prefer to keep such PRs small and separate from functional changes, since the diff genuinely goes unreviewed.
-
-Note that the verdict step failing closed is what makes this visible rather than dangerous. A skipped action posts no verdict, "no recognized verdict" is treated as a failure, and the check goes red. The alternative, treating a missing verdict as a pass, would mean a PR editing the review workflow merges unreviewed, which is exactly the attack the validation exists to stop.
-
 ## The happy path
 
 1. Create a branch, commit, push. Open a pull request against `main`. Open it as a **draft** if it isn't finished: `gh pr create --draft`.
@@ -52,12 +22,37 @@ If anything fails, nothing happens and the PR stays open. Push more commits, the
 - `.github/workflows/claude-review.yml` — two jobs. `review` runs the Anthropic action and turns the verdict into the job's conclusion. `arm-auto-merge` needs `review` to have succeeded, then calls `gh pr merge --auto --squash`.
 - `.github/workflows/claude-fix.yml` — on-demand. Comment `@claude <what to change>` on a PR and Claude pushes the change to the branch.
 
-## Required secrets
+## Repository state this depends on
+
+Half of this automation is not in the repo. It lives in GitHub settings, where it is invisible to any diff, survives no fork or clone, and can be changed without leaving a trace in the history. This section records what must be true. When the automation misbehaves in a way the workflow logs do not explain, check these first.
+
+**Ruleset on `main`**, active, targeting the default branch, with no bypass actors:
+
+| Rule | Required setting | What breaks without it |
+|---|---|---|
+| Require a pull request | enabled, 0 approving reviews | Commits reach `main` without ever entering the gate. Approvals stay at 0 deliberately: the review is enforced as a status check, not as a GitHub review, which also sidesteps the rule that a PAT cannot approve its own account's PR |
+| Require status checks | `scripts`, `firmware`, `review` | Dropping `review` reduces the gate to CI alone: a `REVIEW: FAIL` still turns the check red, but the PR merges anyway |
+| Require branches up to date | enabled | Nothing breaks; this is what makes a PR stall when `main` moves under it, rather than merging stale |
+| Block force pushes, block deletion | enabled | History on `main` becomes rewritable |
+
+The status check contexts are **job** names, not workflow names. `review` comes from `jobs.review.name` in `claude-review.yml`, which is why it is lowercase and sits naturally beside `scripts` and `firmware` from `ci.yml`. Adding the workflow name instead produces a check that never reports and blocks every PR forever.
+
+**Merge settings**, under the repository's general settings:
+
+| Setting | Required | What breaks without it |
+|---|---|---|
+| Allow auto-merge | on | `gh pr merge --auto` fails, so nothing is ever armed and no PR merges by itself |
+| Allow squash merging | on | The arming call specifies `--squash` and fails |
+| Automatically delete head branches | on | Merged branches accumulate; the workflow does not delete them itself |
+
+**Secrets**, stored as repository Actions secrets:
 
 | Secret | What it is | Used by |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | API key from `console.anthropic.com/settings/keys` | `claude-review.yml`, `claude-fix.yml` |
 | `PR_AUTOMATION_PAT` | Fine-grained PAT scoped to this repo with `Contents: write` and `Pull requests: write` | `claude-review.yml`, `claude-fix.yml` |
+
+The PAT expires. When it does, arming fails and reviews stop being able to push fixes, both with authentication errors rather than anything that reads as a gate problem. Rotate it rather than extending the expiry indefinitely.
 
 Both places that use the PAT need it for the same underlying reason: **a push authored by `GITHUB_TOKEN` does not trigger workflows**, which is deliberate on GitHub's part to prevent loops. Auto-merge is performed later by GitHub as whoever armed it, so arming with `GITHUB_TOKEN` would produce a merge commit on `main` that never runs `ci.yml`. `claude-fix.yml` needs it so its push fires `synchronize` and gets re-reviewed rather than sliding in unreviewed.
 
@@ -86,9 +81,9 @@ There is no `enforce-draft.yml` either. Its job was to convert every new PR to a
 
 Deliberate, and the one place this setup trades looks for correctness. A draft has not been reviewed, so `review` is failed rather than skipped while the PR is a draft, and it stays red until a real review turns it green.
 
-Guarding the whole job with `if: draft == false` reads better and is wrong. A skipped job still publishes a check run, and GitHub counts a `skipped` conclusion as satisfying a required check. Measured on the PR that introduced this: with `review` required and only a draft-phase skip on the head SHA, GitHub reported the PR `CLEAN` and `MERGEABLE` the instant it left draft, before any review had run. Arming would still have been safe, since it is gated on a review that actually succeeded, but the required check would have been decorative in that window, and the window is wider than it first looks: a PR that was armed, converted back to draft, pushed, and marked ready again picks up a fresh skipped `review` on the new SHA that reads as green.
+Guarding the whole job with `if: draft == false` reads better and is wrong. A skipped job still publishes a check run, and GitHub counts a `skipped` conclusion as satisfying a required status check, so a PR carrying only a draft-phase skip reports `CLEAN` and `MERGEABLE` the instant it leaves draft, before any review has run on that commit. Arming stays safe either way, since it is gated on a review that actually succeeded, but the required check is decorative in that window, and the window is wider than it first looks: a PR that was armed, converted back to draft, pushed, and marked ready again picks up a fresh skipped `review` on the new commit that reads as green.
 
-So drafts fail the check. The red X means "nothing has reviewed this", which is true.
+So drafts fail the check. The red X means nothing has reviewed this, which is true.
 
 ## Two sharp edges
 
@@ -96,9 +91,21 @@ So drafts fail the check. The red X means "nothing has reviewed this", which is 
 
 **Arming happens after the review, not alongside it.** This is why `arm-auto-merge` lives inside `claude-review.yml` behind `needs: review` rather than in its own workflow triggered by `ready_for_review`. Marking a PR ready does not change the head SHA, and required checks are evaluated per SHA, so a `review` check left over from the draft phase would still be the current one at that instant. A separate arming workflow firing on the same event would race the review it is supposed to be waiting for, and could arm against a stale result. Making arming a downstream job of the review removes the race by construction: there is no moment at which the merge is armed and the review has not run on that exact commit.
 
+## Changing the review workflow itself
+
+`claude-review.yml` cannot review a change to itself. The action refuses to run whenever the file on the branch differs from the copy on the default branch:
+
+> Workflow validation failed. The workflow file must exist and have identical content to the version on the repository's default branch.
+
+That is a security control, and the right one. Without it a pull request could rewrite the review workflow to print `ANTHROPIC_API_KEY` and `PR_AUTOMATION_PAT` into a log, and the review would obligingly run the attacker's edited copy of itself. The workflow reviewing a diff has to be the one `main` already trusts.
+
+The practical effect: a PR touching this file gets no verdict comment, the verdict step fails closed, `review` goes red, and the required check blocks the merge. Drop `review` from the ruleset's required checks, merge, then add it back. Keep such PRs small and separate from functional changes, because the diff genuinely goes unreviewed.
+
+Failing closed is worth preserving here. Treating a missing verdict as a pass would let a PR that edits the review workflow merge unreviewed, which is precisely the attack the validation exists to prevent.
+
 ## Overriding the automation
 
-The automation is additive up to the point where you add `review` to the ruleset, and blocking after it. Once it is a required check, a PR cannot merge without a `REVIEW: PASS`, including by hand. If the Anthropic API is down or Claude is wrong and won't be talked out of it, the escape hatches in increasing order of violence are: comment `@claude` explaining why it is wrong and let it re-review; disable the ruleset's status check requirement temporarily; or merge from a context with bypass permission. `bypass_actors` is currently empty, so there is no standing bypass, which is intentional.
+Because `review` is a required check, this gate genuinely blocks: a PR cannot merge without a `REVIEW: PASS`, including by hand. When the Anthropic API is down, or Claude is wrong and cannot be talked out of it, the escape hatches in increasing order of violence are: comment `@claude` explaining why it is wrong and let it re-review; drop the status check requirement from the ruleset temporarily; or merge from a context with bypass permission. There are no bypass actors, so there is no standing bypass, which is deliberate.
 
 ## What this does and does not protect against
 

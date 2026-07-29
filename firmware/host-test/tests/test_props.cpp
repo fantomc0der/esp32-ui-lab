@@ -374,40 +374,62 @@ void alignment_names_are_accepted() {
   // "start" is the value apply_props initialises place[] to before consulting the
   // table, so it is the one name a misspelling is indistinguishable from — the
   // same limit top-left has, and stated for the same reason.
+  //
+  // As with kAligns, distinctness alone would not see a permuted table, so the
+  // ordering is pinned too: the three one-sided placements advance strictly left
+  // to right, and `between` is the only name that puts the first child where
+  // `start` does *and* the last where `end` does.
   expect_output("props: every flexAlign name distributes children differently",
                 R"JS(
                   const names = ["start","end","center","between","around","evenly"];
-                  const seen = new Set();
+                  const at = {}, seen = new Set();
                   for (const a of names) {
                     const box = lv.obj(lv.screen(), { w: 200, h: 40, pad: 0, border: 0,
                                                       flex: "row", flexAlign: a });
                     const k = [lv.obj(box, { w: 30, h: 20 }), lv.obj(box, { w: 30, h: 20 }),
                                lv.obj(box, { w: 30, h: 20 })];
-                    const b = k.map(x => x.bounds());
-                    seen.add(b.map(r => r.x).join(','));
+                    at[a] = k.map(x => x.bounds().x);
+                    seen.add(at[a].join(','));
                   }
-                  console.log('flexaligns=' + seen.size);
+                  const x0 = n => at[n][0], xl = n => at[n][2];
+                  const pinned = x0("start") < x0("center") && x0("center") < x0("end")
+                              && x0("between") === x0("start") && xl("between") === xl("end")
+                              && x0("around") < x0("evenly");
+                  console.log('flexaligns=' + seen.size + '/' + pinned);
                 )JS",
-                "flexaligns=6");
+                "flexaligns=6/true");
 
   // flexAlign takes two shapes, and the case above only ever passes a string, so
   // only the JS_IsString(v) half of the fetch at bindings_lv.cpp:343-344 runs.
   // The array form is the one every shipped app uses (app/apps/tasks.js) and the
   // one docs/binding-api.md documents, and it is the half reaching
   // JS_GetPropertyUint32 — a JSValue refcount pair inside a two-shape prop is
-  // exactly what this suite is for. The second element also decides both cross
-  // and track, since apply_props passes place[1] twice, and nothing else observes
-  // that: in a column, cross "end" pushes children to the right-hand edge where
-  // "start" leaves them at the left.
+  // exactly what this suite is for.
+  //
+  // apply_props passes place[1] to both the cross and the track argument, and
+  // those are different things in LVGL: cross_place positions an item inside its
+  // own track, track_place positions the tracks inside the container. A track's
+  // cross size is its widest child, so a single-child track leaves cross_place
+  // nothing to move, and an earlier version of this case measured track_place
+  // while claiming both — stubbing the track argument to START failed it and
+  // stubbing the cross argument did not. Two children of different widths
+  // separate them: the narrow child's right edge against the wide child's is
+  // inside the track wherever the track itself ended up, so this observes
+  // cross_place and not track_place. Measured, the stubs now fail the other way
+  // round. track_place is consequently unasserted, which is the honest state:
+  // asserting it would need a second track, and a column whose tracks wrap.
   expect_output("props: flexAlign accepts the [main, cross] array form",
                 R"JS(
                   const mk = (cross) => {
-                    const box = lv.obj(lv.screen(), { w: 120, h: 200, pad: 0, border: 0,
+                    const box = lv.obj(lv.screen(), { w: 200, h: 120, pad: 0, border: 0,
                                                       flex: "column",
                                                       flexAlign: ["start", cross] });
-                    return lv.obj(box, { w: 30, h: 20 }).bounds().x;
+                    const wide = lv.obj(box, { w: 120, h: 20 });
+                    const narrow = lv.obj(box, { w: 30, h: 20 });
+                    const w = wide.bounds(), n = narrow.bounds();
+                    return { flush: n.x + n.w === w.x + w.w, left: n.x === w.x };
                   };
-                  console.log('cross=' + (mk("end") > mk("start")));
+                  console.log('cross=' + (mk("end").flush && mk("start").left));
                 )JS",
                 "cross=true");
 }

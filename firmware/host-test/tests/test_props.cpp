@@ -376,9 +376,13 @@ void alignment_names_are_accepted() {
   // same limit top-left has, and stated for the same reason.
   //
   // As with kAligns, distinctness alone would not see a permuted table, so the
-  // ordering is pinned too: the three one-sided placements advance strictly left
-  // to right, and `between` is the only name that puts the first child where
-  // `start` does *and* the last where `end` does.
+  // ordering is pinned too, and it has to be a *total* order over the five
+  // placements that move the first child: start < around < evenly < center < end.
+  // Three links were not enough — with only start < center < end and
+  // around < evenly, swapping center's and evenly's codes satisfied every clause
+  // and still gave six distinct triples. `between` is pinned separately, as the
+  // only name that puts the first child where `start` does and the last where
+  // `end` does.
   expect_output("props: every flexAlign name distributes children differently",
                 R"JS(
                   const names = ["start","end","center","between","around","evenly"];
@@ -394,7 +398,7 @@ void alignment_names_are_accepted() {
                   const x0 = n => at[n][0], xl = n => at[n][2];
                   const pinned = x0("start") < x0("center") && x0("center") < x0("end")
                               && x0("between") === x0("start") && xl("between") === xl("end")
-                              && x0("around") < x0("evenly");
+                              && x0("around") < x0("evenly") && x0("evenly") < x0("center");
                   console.log('flexaligns=' + seen.size + '/' + pinned);
                 )JS",
                 "flexaligns=6/true");

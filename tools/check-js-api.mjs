@@ -6,17 +6,27 @@
 // so a typo or a binding removed from C fails the build instead of failing
 // on the device.
 //
-//   node tools/check-js-api.mjs
+//   node tools/check-js-api.mjs [directory of scripts, default app/]
 //
-// Namespaced calls only (lv.x, sys.x, fs.x, wifi.x, fetch). Widget methods are
-// not checked: `.set(` on a JS array is indistinguishable from `.set(` on a
-// widget without type inference, and guessing would mean false alarms.
+// Two checks, both derived from the C rather than restated here. Namespaced
+// calls (lv.x, sys.x, fs.x, wifi.x, fetch) are checked against the names the
+// layer registers. Widget methods are checked against the kind of widget they
+// are called on, so `lv.label(p, {}).push(3)` fails here instead of on the
+// panel — but only where the file leaves no doubt about the receiver's kind;
+// see tools/widget-methods.mjs for what that means and what it skips.
+//
+// Still unchecked: whether a prop makes sense for the element it is on. The C
+// layer ignores an unknown prop by design, so `<label points={8} />` does
+// nothing rather than failing, and nothing here notices.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { deriveModel, findWrongKindCalls } from "./widget-methods.mjs";
 
 const SRC = "firmware/lvgl-js-bindings/src";
-const SCRIPTS = "app";
+// The scripts that ship, unless a directory is named — which is how the tests
+// point it at a script that is supposed to fail.
+const SCRIPTS = process.argv[2] ?? "app";
 
 const cFiles = readdirSync(SRC)
   .filter(f => f.endsWith(".cpp"))
@@ -63,6 +73,18 @@ for (const [ns, names] of Object.entries(surface)) {
     console.error(`error: found no bindings for "${ns}" — did the C layer move?`);
     process.exit(2);
   }
+}
+
+// Which widget methods each kind of widget accepts, read out of the maker
+// table and the guards inside the methods themselves. It throws rather than
+// coming back empty, for the same reason as the check above: a table that
+// quietly emptied would pass every script instead of failing loudly.
+let widgets;
+try {
+  widgets = deriveModel(cSource);
+} catch (e) {
+  console.error(`error: ${e.message}`);
+  process.exit(2);
 }
 
 // ---------------------------------------------------------------- scripts
@@ -114,6 +136,13 @@ for (const file of scripts(SCRIPTS)) {
 
   if (/\bfetch\s*\(/.test(text) && !globals.has("fetch")) {
     console.error(`${file}  calls fetch() but it is not registered`);
+    problems++;
+  }
+
+  for (const p of findWrongKindCalls(text, widgets)) {
+    console.error(
+      `${file}:${p.line}  ${p.receiver} is an lv.${p.tag}, and .${p.method}() ` +
+      `only works on ${p.allowed.map(k => `lv.${k}`).join(" or ")}`);
     problems++;
   }
 }

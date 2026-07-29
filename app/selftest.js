@@ -210,10 +210,14 @@ check("delete() releases an event binding", () => {
 });
 
 // ---------------------------------------------------------------- misuse is rejected
+//
+// The marked lines call a method on a widget that does not have it, which is
+// the point: only the board can prove the C guard throws. Without the marker
+// tools/check-js-api.mjs reports them as the mistake they are imitating.
 check("delete() refuses the screen", () => threw(() => scr.delete()));
-check("push() rejects a non-chart", () => threw(() => panel.push(1)));
-check("addTab() rejects a non-tabview", () => threw(() => panel.addTab("x")));
-check("add() rejects a non-list", () => threw(() => panel.add("x")));
+check("push() rejects a non-chart", () => threw(() => panel.push(1)));          // check-js-api: wrong kind on purpose
+check("addTab() rejects a non-tabview", () => threw(() => panel.addTab("x")));  // check-js-api: wrong kind on purpose
+check("add() rejects a non-list", () => threw(() => panel.add("x")));           // check-js-api: wrong kind on purpose
 check("on() rejects a non-function", () => threw(() => panel.on("click", 42)));
 check("on() rejects an unknown event", () => threw(() => panel.on("teleport", () => {})));
 check("timer() rejects a non-function", () => threw(() => lv.timer(50, "nope")));
@@ -243,7 +247,7 @@ check("keyboard targets a textarea", () => {
   return kb.target(ta) === kb;
 });
 
-check("target() rejects a non-keyboard", () => threw(() => panel.target(panel)));
+check("target() rejects a non-keyboard", () => threw(() => panel.target(panel)));  // check-js-api: wrong kind on purpose
 
 // ---------------------------------------------------------------- fs
 check("fs reports availability", () => typeof fs.available() === "boolean");

@@ -34,10 +34,16 @@ jobs:
             echo "ok  $f"
           done
 
-      # Catches the failure that would otherwise only show up on the device:
-      # a script calling a binding the C layer does not register.
+      # Catches the failures that would otherwise only show up on the device:
+      # a script calling a binding the C layer does not register, or calling a
+      # widget method on a kind of widget that does not have it.
       - name: Check scripts against the binding surface
         run: node tools/check-js-api.mjs
+
+      # That check reads its constraints out of the C and infers kinds from the
+      # scripts, so both halves are worth testing on their own.
+      - name: Test the binding-surface check
+        run: node tools/test-check-js-api.mjs
 
       # The JSX transform and the component runtime are plain JavaScript, so
       # unlike the binding layer they can be tested properly without a board.

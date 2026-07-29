@@ -118,6 +118,8 @@ Two things that stay in pixels no matter what:
 - `.index()` / `.index(n)` — read or set this widget's position among its parent's children. Moving an existing widget is how a reordered list keeps the widgets it already had
 - `.bounds()` — `{ x, y, w, h }` of the content area in screen coordinates; combine with the `x, y` from a pointer event to place children under a finger
 
+Every method sits on one shared prototype, so the ones marked "lists only" and the like exist on every handle and refuse at the point of the call: `lv.label(p, {}).push(3)` throws `push() only works on lv.chart widgets`. [`tools/check-js-api.mjs`](../tools/check-js-api.mjs) catches that on the PC where it can see what the receiver is — a `const` bound straight to a maker call, and chains through `.set()` and `.on()`. A widget from `.add()` or `.addTab()`, a function parameter or anything reassigned is left to the board, so the failure above is still reachable; the check narrows the gap rather than closing it. A line that means to call the wrong method (the misuse section of [`app/selftest.js`](../app/selftest.js)) opts out with a `// check-js-api: wrong kind on purpose` comment.
+
 ## fs — files
 
 Paths are absolute. An unprefixed path uses the SD card, falling back to the flash partition when no card is fitted; a `flash:` prefix always means flash. Reads block the UI task and are capped at 256 KB, so this is for config, logs, and cached data rather than large media.

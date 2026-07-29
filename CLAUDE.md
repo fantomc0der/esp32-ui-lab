@@ -44,6 +44,7 @@ What CI (`.github/workflows/ci.yml`) actually checks, without hardware:
 ```powershell
 node --check app/**/*.js                 # syntax-check every script
 node tools/check-js-api.mjs              # fail if a script calls a binding the C layer doesn't register
+node tools/test-check-js-api.mjs         # that check's own tests
 node tools/test-jsx.mjs                  # the JSX transform
 node tools/test-ui.mjs                   # the component runtime, against a fake lv
 node tools/build-app.mjs --check         # fail if a committed app/apps/*.js is stale
@@ -81,6 +82,7 @@ The bottom-right corner is one firmware-owned slot on `lv_layer_top()` holding a
 - Widget handles are weak pointers; using one after its container is `.clean()`'d throws a JS `TypeError` rather than corrupting memory.
 - Teardown order on reload is fixed: JS timers → `lv_obj_clean(screen)` → screen-level bindings → JS context → runtime.
 - `tools/check-js-api.mjs` derives the binding surface by scanning `JS_SetPropertyStr` calls in `lvgl-js-bindings/src/*.cpp` and the `kMakers[]` table — if you add a binding, it's picked up automatically as long as it goes through `JS_SetPropertyStr`; nothing needs updating in the checker itself.
+- It also checks widget methods against the widget's kind (`tools/widget-methods.mjs`), deriving that table the same way: `kMakers[]` plus `js_lv_make`'s switch give tag → LVGL class, and a method's `if (!lv_obj_check_type(...)) return JS_ThrowTypeError` guard gives method → the classes it accepts. So a method whose restriction changes in C changes here too. A receiver is only followed when the file settles its kind beyond doubt (every declaration a direct `lv.<tag>()`, never a parameter, never reassigned); anything else is left unchecked rather than guessed, and a line that means to call the wrong method — `app/selftest.js` proving the C guard throws — says so with `// check-js-api: wrong kind on purpose`.
 
 Full internals (JSValue ownership, call/event flow, memory map): `docs/runtime-architecture.md`. What a port to another board must supply: `docs/portability.md`.
 

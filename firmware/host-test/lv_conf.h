@@ -9,7 +9,7 @@
 // source of truth; docs/portability.md and CLAUDE.md both say it is, and a
 // second copy here would quietly make that untrue.
 //
-// Only three things change, each because the host is not the board:
+// Four things change, each because the host is not the board:
 //
 //   LV_USE_STDLIB_MALLOC   LVGL's builtin allocator is a fixed-size pool it
 //                          manages itself, so ASan sees one big malloc and none
@@ -22,6 +22,11 @@
 //                          files do not appear to disagree. LVGL only reads it
 //                          under LV_STDLIB_BUILTIN, so with CLIB above it bounds
 //                          nothing and could equally be omitted.
+//
+//   LV_USE_ASSERT_OBJ      Off on the board, because it costs a check on every
+//                          object access and the panel is trying to hold a frame
+//                          rate. Free here, and a backstop for a binding added
+//                          later that forgets to validate its handle.
 //
 //   LV_ASSERT_HANDLER      The board's handler spins in a `while(1);`, which is
 //                          right for a panel you can power-cycle and wrong for
@@ -51,11 +56,14 @@
 #define LV_MEM_SIZE (48 * 1024U)
 
 // The board leaves this off because it costs a check on every object access, which
-// is not free on a panel trying to hold a frame rate. Here it is free, and it is a
-// second detector for the stale-handle bug that does not depend on the allocator:
-// ASan only reports a use-after-free once the memory has been recycled, whereas
-// this catches an invalid lv_obj_t the moment LVGL is asked to use one. Different
-// mechanism, same defect, and the cheaper of the two to read.
+// is not free on a panel trying to hold a frame rate. Here it is free.
+//
+// It does NOT add coverage for the stale-handle cases in test_ownership: those
+// return a TypeError from jsvm_arg_widget()'s lv_obj_is_valid() check before LVGL
+// is handed the object at all, so no LV_ASSERT_OBJ is reachable on that path. What
+// it buys is a backstop for the binding added later that forgets to validate —
+// LVGL would then abort with a diagnostic on the spot rather than waiting for ASan
+// to notice the memory being reused.
 #undef LV_USE_ASSERT_OBJ
 #define LV_USE_ASSERT_OBJ 1
 

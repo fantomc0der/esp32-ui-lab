@@ -26,26 +26,6 @@ namespace {
 fs::FS g_sd;
 fs::FS g_flash;
 
-void expect_output(const char *name, const char *src, const char *expect) {
-  const size_t mark = host_serial_mark();
-  if (!run_script(src, name)) {
-    bad(name, "script evaluation threw");
-    jsvm_stop();
-    host_settle();
-    return;
-  }
-  host_settle();
-  if (host_serial_contains_since(mark, expect)) {
-    ok(name);
-  } else {
-    std::string got = host_serial_since(mark);
-    if (got.size() > 300) got = got.substr(got.size() - 300);
-    bad(name, std::string("expected \"") + expect + "\", got: " + got);
-  }
-  jsvm_stop();
-  host_settle();
-}
-
 // ---- sys, and the host hooks behind it -------------------------------------
 
 void sys_reports_what_the_hooks_say() {

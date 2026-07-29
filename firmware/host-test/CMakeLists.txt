@@ -34,6 +34,17 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-O1 -g")
 set(CMAKE_C_FLAGS_DEBUG "-O1 -g")
 
+# Strip -DNDEBUG out of every configuration, not just the default one. Choosing
+# Debug above is not enough on its own: someone configuring with an explicit
+# -DCMAKE_BUILD_TYPE=RelWithDebInfo would silently get NDEBUG back and lose the
+# QuickJS asserts this target is built to keep. Removing it from the flags for all
+# configurations means no build of this project can switch them off by accident.
+foreach(cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+  foreach(lang CXX C)
+    string(REPLACE "-DNDEBUG" "" CMAKE_${lang}_FLAGS_${cfg} "${CMAKE_${lang}_FLAGS_${cfg}}")
+  endforeach()
+endforeach()
+
 set(FIRMWARE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set(BINDINGS_DIR ${FIRMWARE_DIR}/lvgl-js-bindings/src)
 set(QUICKJS_DIR ${FIRMWARE_DIR}/quickjs-ng/src)
@@ -97,6 +108,18 @@ add_library(host_bindings STATIC
   stubs/preferences_stub.cpp
   host_harness.cpp
 )
+# -Wall -Wextra, so "third-party built quietly, ours not" is actually true rather
+# than everything being built with Ubuntu's bare defaults.
+#
+# -Wno-unused-parameter is the one exclusion, and it is not laziness: QuickJS's
+# JSCFunction signature is fixed, so a binding that ignores an argument it is
+# obliged to accept (js_timer_stop takes ctx and does not need it) is correct code.
+# The alternative would be editing firmware to silence a host-only diagnostic,
+# which is exactly the tail wagging the dog this target must avoid.
+#
+# Not -Werror either: the binding layer targets a 32-bit machine, so a host warning
+# about width is information rather than grounds to fail a build.
+target_compile_options(host_bindings PRIVATE -Wall -Wextra -Wno-unused-parameter)
 target_include_directories(host_bindings PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs

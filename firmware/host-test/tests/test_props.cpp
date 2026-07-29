@@ -14,29 +14,6 @@ using namespace host_test;
 
 namespace {
 
-// Runs a script that prints one line, and checks the line appears. The script
-// is the assertion; this just plumbs the output.
-void expect_output(const char *name, const char *src, const char *expect) {
-  const size_t mark = host_serial_mark();
-  if (!run_script(src, name)) {
-    bad(name, "script evaluation threw");
-    jsvm_stop();
-    host_settle();
-    return;
-  }
-  host_settle();
-  if (host_serial_contains_since(mark, expect)) {
-    ok(name);
-  } else {
-    std::string got = host_serial_since(mark);
-    // Trim to keep a failure readable: the VM's own boot lines precede it.
-    if (got.size() > 300) got = got.substr(got.size() - 300);
-    bad(name, std::string("expected \"") + expect + "\", got: " + got);
-  }
-  jsvm_stop();
-  host_settle();
-}
-
 // ---- the ordering rule ------------------------------------------------------
 
 // The rule bindings_lv.cpp calls out explicitly: apply_props reads `value` near

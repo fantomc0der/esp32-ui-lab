@@ -86,6 +86,35 @@ inline bool run_script(const char *src, const char *name = "<test>") {
   return ok_eval;
 }
 
+// Runs a script that prints one `key=value` line and checks that exact line
+// appeared. The script is the assertion; this plumbs the output.
+//
+// Matching is whole-line for the same reason check_printed is: a substring search
+// makes "sel=1" satisfy an assertion about "sel=10". No assertion in the suites
+// currently has a value space wide enough to collide, but relying on that is
+// relying on arithmetic rather than on the check, and the next value added would
+// arm the trap.
+inline void expect_output(const char *name, const char *src, const char *expect) {
+  const size_t mark = host_serial_mark();
+  if (!run_script(src, name)) {
+    bad(name, "script evaluation threw");
+    jsvm_stop();
+    host_settle();
+    return;
+  }
+  host_settle();
+  if (host_serial_contains_since(mark, (std::string(expect) + "\n").c_str())) {
+    ok(name);
+  } else {
+    std::string got = host_serial_since(mark);
+    // Trim to keep a failure readable: the VM's own boot lines precede it.
+    if (got.size() > 300) got = got.substr(got.size() - 300);
+    bad(name, std::string("expected \"") + expect + "\", got: " + got);
+  }
+  jsvm_stop();
+  host_settle();
+}
+
 // The count line, and the process's exit status. Non-zero on any failure is what
 // makes ctest (and CI) notice.
 inline int report(const char *suite) {

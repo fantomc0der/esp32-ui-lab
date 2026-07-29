@@ -50,9 +50,13 @@ uint32_t heap_caps_get_free_size(uint32_t caps);
 uint32_t heap_caps_get_largest_free_block(uint32_t caps);
 uint32_t heap_caps_get_total_size(uint32_t caps);
 
-// QuickJS's usable_size hook must report 0 on the board (reporting real sizes
-// corrupts the heap under IDF poisoning; docs/engine-notes.md). The host copy of
-// that rule is enforced by jsvm_core.cpp itself, which never calls this.
+// Part of the IDF surface, so it exists for completeness, but deliberately has
+// no caller: QuickJS's usable_size hook must report 0 rather than a real size,
+// because with IDF heap poisoning this figure includes the tail canary and
+// letting string code write into it corrupts the heap (docs/engine-notes.md).
+// jsvm_core.cpp honours that by returning 0 and never calling this, and the
+// absence of callers here is that invariant being visible rather than an
+// oversight.
 size_t heap_caps_get_allocated_size(void *ptr);
 
 // Bytes currently outstanding through the shim. The reload test's leak check.

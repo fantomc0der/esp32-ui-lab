@@ -18,8 +18,10 @@
 //                          use-after-free — the stale-handle bug this repo has
 //                          already hit once — visible to the sanitizer.
 //
-//   LV_MEM_SIZE            Irrelevant once malloc is the C library's, but LVGL
-//                          still validates it, so it is left defined.
+//   LV_MEM_SIZE            Left defined at the board's value purely so the two
+//                          files do not appear to disagree. LVGL only reads it
+//                          under LV_STDLIB_BUILTIN, so with CLIB above it bounds
+//                          nothing and could equally be omitted.
 //
 //   LV_ASSERT_HANDLER      The board's handler spins in a `while(1);`, which is
 //                          right for a panel you can power-cycle and wrong for

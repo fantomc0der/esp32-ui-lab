@@ -133,11 +133,6 @@ bool FS::mkdir(const char *path) {
   return true;
 }
 
-void FS::host_write(const std::string &path, const std::string &contents) {
-  const std::string p = normalize(path.c_str());
-  files_[p].assign(contents.begin(), contents.end());
-}
-
 void FS::host_clear() {
   files_.clear();
   dirs_.clear();

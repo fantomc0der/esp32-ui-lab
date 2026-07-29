@@ -16,15 +16,25 @@ class Preferences {
 
   size_t putString(const char *key, const char *value);
 
-  // Copies into buf and returns the length written, excluding the terminator.
-  // Leaves buf untouched and returns 0 when the key is absent, which is what
-  // the caller relies on to keep its default.
+  // Copies into buf and returns the number of bytes written *including* the
+  // terminator, which is what the ESP32 core's implementation returns. Returns 0
+  // and leaves buf untouched when the key is absent or the value does not fit —
+  // the caller relies on that to keep its default, and on the refuse-rather-than-
+  // truncate behaviour so a mis-sized buffer cannot yield a plausible-looking
+  // truncated path.
   size_t getString(const char *key, char *buf, size_t len);
 
   bool remove(const char *key);
 
   // Host-side reset, so one test's pin cannot leak into the next.
   static void host_clear();
+
+  // Writes straight into the store, without going through a begin()/end() pair.
+  // This is how a test arranges "the device already had this in NVS before it
+  // booted" — which is the only way to observe that a read really goes to
+  // storage, because bindings_sys.cpp caches the pin in a file-static on first
+  // read and nothing in the library resets it.
+  static void host_seed(const char *ns, const char *key, const char *value);
 
  private:
   const char *ns_ = nullptr;

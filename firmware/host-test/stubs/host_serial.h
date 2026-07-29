@@ -16,11 +16,8 @@ std::string host_serial_since(size_t mark);
 // Whether `needle` appears in the output since `mark`.
 bool host_serial_contains_since(size_t mark, const char *needle);
 
-void host_serial_clear();
-
 // The clock millis() reports, advanced explicitly rather than by sleeping, so
 // timer tests are exact instead of racing wall time. LVGL's tick is fed from
-// the same counter (see lv_tick_get in the harness), which keeps lv_timer and
-// the JS side agreeing on how much time has passed.
+// the same counter (the harness's tick_cb returns millis()), which keeps
+// lv_timer and the JS side agreeing on how much time has passed.
 void host_clock_advance(uint32_t ms);
-void host_clock_reset();

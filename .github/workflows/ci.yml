@@ -152,23 +152,28 @@ jobs:
       - name: Install the toolchain
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      # Cache the LVGL *source clone* only, not the build tree around it. Two
-      # reasons, both learned the hard way:
+      # Cache the LVGL clone, skipping the ~900 object files in _deps/lvgl-build:
+      # those are rebuilt from scratch anyway (a restored build tree has no
+      # .ninja_log, so Ninja treats every output as dirty), and caching stale
+      # objects next to an empty dependency log is how a cache starts producing
+      # false greens rather than speed.
       #
-      #   - `_deps` also holds ~900 LVGL object files. Restoring those alongside a
-      #     build directory whose build.ninja and .ninja_log are NOT cached invites
-      #     a stale link: Ninja would have no header-dependency or command-line
-      #     history, while the restored objects are newer than their sources. It
-      #     happens not to bite today (a fresh build.ninja rebuilds everything
-      #     anyway), which is exactly the kind of accident not to depend on.
-      #   - Since the host lv_conf.h includes the board's copy, a change to either
-      #     one changes what LVGL must be compiled as. Keying on both, plus the
-      #     CMake file that sets the sanitizer flags, means the cache cannot
-      #     outlive the configuration it was built for.
-      - name: Cache the LVGL source clone
+      # lvgl-subbuild has to be in here alongside lvgl-src. It holds FetchContent's
+      # stamp files, and without them CMake's generated gitclone.cmake starts with
+      # an unconditional `rm -rf "<SOURCE_DIR>"` — so caching lvgl-src on its own
+      # is worse than useless: the restored tree is deleted and re-cloned, with the
+      # cache step still reporting a hit. Verified by restoring lvgl-src alone with
+      # a marker file in it and watching the marker disappear.
+      #
+      # Keyed on both lv_conf.h files because the host one includes the board's, so
+      # either changes what LVGL must be compiled as, plus the CMakeLists that sets
+      # the sanitizer flags. That way the cache cannot outlive its configuration.
+      - name: Cache the LVGL clone
         uses: actions/cache@v4
         with:
-          path: firmware/host-test/.build/_deps/lvgl-src
+          path: |
+            firmware/host-test/.build/_deps/lvgl-src
+            firmware/host-test/.build/_deps/lvgl-subbuild
           key: host-test-lvgl-9.5.0-${{ hashFiles('firmware/host-test/lv_conf.h', 'firmware/boards/waveshare-s3-touch-147/lv_conf.h', 'firmware/host-test/CMakeLists.txt') }}
 
       - name: Configure

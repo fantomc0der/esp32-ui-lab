@@ -307,9 +307,9 @@ void wrong_kind_method_throws() {
                 R"JS(
                   const tv = lv.tabview(lv.screen(), { w: "100%", h: "100%" });
                   const tab = tv.addTab("one");
-                  console.log('righttkind=' + (tab.index() >= 0));
+                  console.log('rightkind=' + (tab.index() >= 0));
                 )JS",
-                "righttkind=true");
+                "rightkind=true");
 }
 
 }  // namespace

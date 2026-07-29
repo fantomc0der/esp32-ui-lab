@@ -77,7 +77,6 @@ bool host_serial_contains_since(size_t mark, const char *needle) {
   return host_serial_since(mark).find(needle) != std::string::npos;
 }
 
-void host_serial_clear() { g_serial_log.clear(); }
 
 // ---------------------------------------------------------------- chip identity
 
@@ -204,5 +203,3 @@ uint32_t millis() { return g_millis; }
 void delay(uint32_t ms) { g_millis += ms; }
 
 void host_clock_advance(uint32_t ms) { g_millis += ms; }
-
-void host_clock_reset() { g_millis = 0; }

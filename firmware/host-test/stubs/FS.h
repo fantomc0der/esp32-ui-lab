@@ -70,8 +70,10 @@ class FS {
   bool remove(const char *path);
   bool mkdir(const char *path);
 
-  // Host-side setup, so a test can lay out a card before booting a script.
-  void host_write(const std::string &path, const std::string &contents);
+  // Resets to an empty filesystem, so one test's files cannot leak into the next.
+  // There is deliberately no host-side write helper: tests lay files down through
+  // fs.write(), which exercises the binding on the way in rather than bypassing
+  // the code under test.
   void host_clear();
 
  private:

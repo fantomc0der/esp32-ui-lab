@@ -17,11 +17,19 @@
 #include "stubs/Arduino.h"
 #include "stubs/host_serial.h"
 
-// The panel's real geometry, landscape, as board_pins.h defines it. Layout
-// assertions in the tests only mean something against the true resolution:
-// a "50%" width or a bottom-right alignment resolves differently otherwise.
-static constexpr int32_t kScreenW = 320;
-static constexpr int32_t kScreenH = 172;
+// The panel's geometry, taken from the board's own header rather than repeated
+// here, so a resolution change cannot leave the host asserting against a screen
+// size the board no longer has. It matters because layout assertions only mean
+// something at the true resolution: a "50%" width or a bottom-right alignment
+// resolves differently otherwise.
+//
+// This is the same direction as the lv_conf.h include — host-test reads from
+// boards/, never the reverse. The binding layer still contains no board
+// specifics, which is the invariant CLAUDE.md actually protects.
+#include "../boards/waveshare-s3-touch-147/board_pins.h"
+
+static constexpr int32_t kScreenW = SCREEN_W;
+static constexpr int32_t kScreenH = SCREEN_H;
 
 namespace {
 

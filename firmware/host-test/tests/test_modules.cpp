@@ -123,32 +123,64 @@ void sys_info_and_heap_have_the_documented_shape() {
                 "uptime=true");
 }
 
-// The pin is stored through Preferences, and the contract that matters is that
-// it outlives the VM: a pinned app has to survive the reboot that follows.
-void sys_pin_round_trips_through_storage() {
+// The pin, and the one thing a host test has to be careful about here.
+//
+// bindings_sys.cpp caches the pin in a file-static (g_pinned, guarded by
+// g_pinned_loaded) that nothing in the library resets, because on a device the
+// process only starts once. So after any call to sys.pin(), every later
+// sys.pinned() in this process is answered from that cache rather than from
+// storage — a stop/start cycle does not clear it, and a test written as
+// "pin, restart, read it back" would pass with storage entirely disconnected.
+// Verified by gutting Preferences::putString: all four assertions still passed.
+//
+// The way to observe a real read is to seed the store before anything has
+// populated the cache, which is what a device that already had a pin in NVS
+// looks like at boot. That path is asserted first, and deliberately before
+// anything calls sys.pin().
+void sys_pin_reads_and_writes_storage() {
   Preferences::host_clear();
 
-  expect_output("sys: nothing is pinned on a fresh device",
-                "console.log('pin=' + sys.pinned());", "pin=null");
+  // Seeded before the first read of any kind, so this can only come from the
+  // store. This is the assertion that proves reading works.
+  Preferences::host_seed("jsvm-app", "pinned", "/apps/preseeded.js");
+  expect_output("sys: a pin already in storage is read at first use",
+                "console.log('pin=' + sys.pinned());", "pin=/apps/preseeded.js");
 
-  expect_output("sys: pin() stores a path",
+  // And the write half, checked against the store directly rather than through
+  // sys.pinned(), which the cache would answer.
+  expect_output("sys: pin() reports the path it was given",
                 R"JS(
                   sys.pin("/apps/weather.js");
                   console.log('pin=' + sys.pinned());
                 )JS",
                 "pin=/apps/weather.js");
 
-  // A new VM, the same store: this is the reboot case. The pin must still be
-  // there, which is what makes it a pin rather than a variable.
-  expect_output("sys: a pin survives a stop/start cycle",
-                "console.log('pin=' + sys.pinned());", "pin=/apps/weather.js");
+  char buf[128] = {0};
+  Preferences p;
+  if (p.begin("jsvm-app", true)) {
+    p.getString("pinned", buf, sizeof(buf));
+    p.end();
+  }
+  check("sys: pin() wrote the path through to storage",
+        std::string(buf) == "/apps/weather.js");
 
-  expect_output("sys: unpin() clears it",
+  expect_output("sys: unpin() clears the pin",
                 R"JS(
                   sys.unpin();
                   console.log('pin=' + sys.pinned());
                 )JS",
                 "pin=null");
+
+  // unpin() must remove the key, not just blank the cache, or the next boot
+  // would come up pinned again.
+  char after[128] = {0};
+  Preferences p2;
+  size_t got = 1;
+  if (p2.begin("jsvm-app", true)) {
+    got = p2.getString("pinned", after, sizeof(after));
+    p2.end();
+  }
+  check_eq("sys: unpin() removed the key from storage", (int)got, 0);
 
   Preferences::host_clear();
 }
@@ -186,11 +218,16 @@ void fs_round_trips_a_file() {
   expect_output("fs: reading a missing file returns null rather than throwing",
                 "console.log('missing=' + fs.read('/nope.txt'));", "missing=null");
 
+  // Sorted before comparing, deliberately. The in-memory stub happens to return
+  // entries in sorted order, but a real FAT directory does not promise any
+  // particular order, so asserting the stub's would be testing the stub rather
+  // than the binding — and would pass here while telling a reader something
+  // untrue about the device.
   expect_output("fs: list() names what was written",
                 R"JS(
                   fs.write("/d/one.txt", "1");
                   fs.write("/d/two.txt", "2");
-                  const names = fs.list("/d").join(",");
+                  const names = fs.list("/d").sort().join(",");
                   console.log('list=' + names);
                 )JS",
                 "list=one.txt,two.txt");
@@ -247,7 +284,7 @@ int main() {
   sys_reports_what_the_hooks_say();
   sys_backlight_clamps_and_reaches_the_host();
   sys_info_and_heap_have_the_documented_shape();
-  sys_pin_round_trips_through_storage();
+  sys_pin_reads_and_writes_storage();
   fs_round_trips_a_file();
   fs_flash_prefix_targets_the_other_filesystem();
   fs_without_a_filesystem_throws();

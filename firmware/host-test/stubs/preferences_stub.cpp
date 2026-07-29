@@ -57,7 +57,7 @@ size_t Preferences::getString(const char *key, char *buf, size_t len) {
   if (v.size() + 1 > len) return 0;
   memcpy(buf, v.data(), v.size());
   buf[v.size()] = '\0';
-  return v.size();
+  return v.size() + 1;  // includes the terminator, as the core's does
 }
 
 bool Preferences::remove(const char *key) {
@@ -68,3 +68,8 @@ bool Preferences::remove(const char *key) {
 }
 
 void Preferences::host_clear() { store().clear(); }
+
+void Preferences::host_seed(const char *ns, const char *key, const char *value) {
+  if (!ns || !key || !value) return;
+  store()[ns][key] = value;
+}

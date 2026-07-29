@@ -1,6 +1,8 @@
 # Binding API
 
-The JavaScript surface exposed by the [`lvgl-js-bindings`](../firmware/lvgl-js-bindings/README.md) library. Deliberately curated, not exhaustive: 11 widget makers plus around 30 module functions, covering the 20% of LVGL that delivers 80% of a small-panel UI. Everything runs on one FreeRTOS task (the same one that runs `lv_timer_handler`), so there is no locking anywhere and callbacks never race the renderer.
+The JavaScript surface exposed by the [`lvgl-js-bindings`](../firmware/lvgl-js-bindings/README.md) library. Deliberately curated, not exhaustive: 17 widget makers plus around 30 module functions, covering the 20% of LVGL that delivers 80% of a small-panel UI. Everything runs on one FreeRTOS task (the same one that runs `lv_timer_handler`), so there is no locking anywhere and callbacks never race the renderer.
+
+This page is the whole API, and everything below is what the firmware provides. There is also an optional layer above it: [`ui-runtime.md`](ui-runtime.md) describes a JSX component model with hooks, written in JavaScript on top of these same calls and bundled into apps that ask for it. It changes how a layout is expressed, not what is available — every prop and every method here means the same thing under it.
 
 ## Globals
 
@@ -25,6 +27,12 @@ The full modern language is available (closures, template literals, BigInt, JSON
 | `lv.tabview(parent, props?)` | swipeable/tappable tabs; `bar` prop sets tab-bar height, `.addTab(name)` returns the tab's content container |
 | `lv.textarea(parent, props?)` | text field; `placeholder`, `password` (masks input), `oneLine`, `maxLength`. `.value()` reads and writes its text |
 | `lv.keyboard(parent, props?)` | on-screen keyboard; `.target(textarea)` routes typing into a field, and it emits `ready`/`cancel` for its tick and cross keys |
+| `lv.bar(parent, props?)` | progress bar: a slider with no knob and no touch. `range`, `value` |
+| `lv.checkbox(parent, props?)` | `text` is its label, `value` is the boolean |
+| `lv.roller(parent, props?)` | scrolling picker; `options`, `visibleRows`, `infinite`. `.value()` is the selected **index** |
+| `lv.dropdown(parent, props?)` | drop-down picker; `options`. `.value()` is the selected **index** |
+| `lv.spinner(parent, props?)` | indeterminate busy indicator; `duration` (ms per turn), `sweep` (arc degrees) |
+| `lv.led(parent, props?)` | status lamp; `color` is the lamp colour, `value` is on/off, `brightness` is 0–255 |
 | `lv.timer(ms, fn)` | LVGL timer; returns a handle with `.stop()`; 10 ms floor |
 
 ### Props
@@ -41,8 +49,12 @@ Accepted at creation and via `.set(props)`. Unknown keys are ignored (scripts sh
 | `text` | labels and buttons |
 | `bg`, `color` | background / text color: `"#RRGGBB"` string or `0xRRGGBB` number |
 | `font` | `14`, `16`, `20`, `28`, or `40` (the compiled-in montserrat sizes) |
-| `range` | `[min, max]` for slider/arc, Y axis for chart |
-| `value` | number for slider/arc, boolean for switch |
+| `range` | `[min, max]` for slider/bar/arc, Y axis for chart |
+| `value` | number for slider/bar/arc, boolean for switch/checkbox/led, selected index for roller/dropdown, text for textarea |
+| `options` | roller and dropdown: an array of strings (or one `"\n"`-separated string) |
+| `visibleRows`, `infinite` | roller only: how many rows show, and whether it wraps around |
+| `brightness` | led only, 0–255 |
+| `duration`, `sweep` | spinner only: milliseconds per turn, and the arc's length in degrees |
 | `pad`, `radius` | style shorthands, pixels |
 | `border`, `borderColor` | border width (pixels) and color |
 | `scroll` | `false` removes the scrollable flag |
@@ -65,7 +77,7 @@ lv.label(bar, { text: "left" });
 lv.label(bar, { text: "right" });
 ```
 
-**Alignment, for anything that should hang off an edge or the middle.** An element aligned `bottom-mid` stays at the bottom of any panel with no size involved, so the extra space on a larger display goes into the margin instead of into a gap. [`apps/weather.js`](../app/apps/weather.js) is laid out entirely this way and reads no dimensions at all.
+**Alignment, for anything that should hang off an edge or the middle.** An element aligned `bottom-mid` stays at the bottom of any panel with no size involved, so the extra space on a larger display goes into the margin instead of into a gap. The weather app is laid out entirely this way and reads no dimensions at all ([`app/src/weather.jsx`](../app/src/weather.jsx), or [its pre-port original](../tools/fixtures/weather-imperative.js) for the same layout in plain `lv` calls).
 
 **`lv.size()`, for the decisions a percentage cannot express.** It returns `{w, h}` of the display. Read it once at startup, since a panel does not resize:
 
@@ -85,19 +97,25 @@ The pattern worth copying from [`app/app.js`](../app/app.js) and [`apps/vitals.j
 Two things that stay in pixels no matter what:
 
 - **Fonts do not scale.** The sizes are fixed bitmaps compiled into the firmware, so text is the same height on a 172px panel and a 320px one. Anything sized to fit text is therefore a pixel constant, and a percentage there will clip on a small panel or float in space on a large one.
-- **The firmware's corner button is 34px in the bottom-right** of every screen (see [Apps and getting back](#apps-and-getting-back)). A control placed under it is unreachable, so leave ~40px clear there — `apps/wifi.js` sizes its keyboard `S.w - CORNER` for exactly this reason.
+- **The firmware's corner button is 34px in the bottom-right** of every screen (see [Apps and getting back](#apps-and-getting-back)). A control placed under it is unreachable, so leave ~40px clear there — the wifi app sizes its keyboard `S.w - CORNER` for exactly this reason.
 
 `selftest.js` deliberately keeps fixed sizes throughout: its geometry is test fixtures with expected values, not a layout.
+
+### One ordering rule, for the pickers
+
+`options` and `value` in the same call work as you would expect — `lv.roller(p, { options: ["a", "b", "c"], value: 2 })` selects `"c"`. That is not free: props are applied in a fixed order and `value` is read before `options`, so the selection is applied a second time once the list exists. Without that, LVGL would clamp a selection made against an empty list to zero. Worth knowing only because it is the one place where a prop is not simply written once.
 
 ### Widget methods
 
 - `.set(props)` — apply props, returns the widget (chainable)
 - `.on(event, fn)` — `"click"`, `"change"`, `"pressing"`, `"press"`, `"longpress"`; returns the widget. When a pointer drove the event the callback is `fn(widget, x, y)` with the touch point in screen coordinates; otherwise just `fn(widget)`. `"longpress"` fires while the finger is still down, and LVGL still sends `"click"` when it lifts — a long-press gesture that must not also count as a tap has to claim the click itself, which is what [`app/app.js`](../app/app.js) does with a flag it clears on `"press"`
-- `.value()` / `.value(n)` — get/set for slider, arc, switch
+- `.value()` / `.value(n)` — get/set for slider, bar, arc, switch, checkbox, led, and the two pickers (where it is the selected index, so a script indexes its own `options` array rather than parsing a string back)
 - `.add(text)` — lists only; returns the row's button handle
 - `.addTab(name)` — tabviews only; returns the tab's content container
 - `.push(n)` — charts only; appends to the series, shifting left when full
 - `.clean()` — deletes all children (their callbacks are released via the DELETE hooks)
+- `.delete()` — deletes this one widget and its subtree, leaving its siblings alone. Same hazard as `.clean()`: deleting the widget LVGL is currently dispatching an event to is not safe, so defer it a tick. Throws on the screen itself
+- `.index()` / `.index(n)` — read or set this widget's position among its parent's children. Moving an existing widget is how a reordered list keeps the widgets it already had
 - `.bounds()` — `{ x, y, w, h }` of the content area in screen coordinates; combine with the `x, y` from a pointer event to place children under a finger
 
 ## fs — files
@@ -185,7 +203,7 @@ Over serial, `pin [path]` and `unpin` do the same thing, with one difference wor
 
 A pin that names a missing or broken script costs you the appliance behaviour, not the board: the load fails, and the firmware falls back to the launcher exactly as it does for any other app. A pin that no `/apps` row accounts for still gets a row of its own there, marked `(missing)` when the file is genuinely gone, because a pin you cannot see is a pin you cannot release without a serial cable.
 
-One thing to know when building multi-screen apps: rebuilding the screen from inside a click handler deletes the widget LVGL is currently dispatching to. Defer it by a tick instead, which is what [`apps/wifi.js`](../app/apps/wifi.js) does:
+One thing to know when building multi-screen apps: rebuilding the screen from inside a click handler deletes the widget LVGL is currently dispatching to. Defer it by a tick instead:
 
 ```js
 const next = fn => { const t = lv.timer(20, () => { t.stop(); fn(); }); };

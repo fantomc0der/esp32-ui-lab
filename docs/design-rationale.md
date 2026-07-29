@@ -24,7 +24,19 @@ So porting would mean replacing the event loop, replacing the networking stack, 
 
 The architecture, which is the part that transfers: **a JS engine compiled into the firmware, a hand-written binding layer over LVGL's C API, and scripts stored as data rather than code.**
 
-Even the engine choice is shared, since QuickJS-ng is the maintained fork of the same QuickJS that sits underneath txiki.js. What was dropped is the scaffolding around it. The cost of that scaffolding, in features, is real and worth stating plainly: no JSX, no React component model, no CSS-like styling, no animation or image handling, no npm or bundler workflow.
+Even the engine choice is shared, since QuickJS-ng is the maintained fork of the same QuickJS that sits underneath txiki.js. What was dropped is the scaffolding around it. The cost of that scaffolding, in features, is real and worth stating plainly: no CSS-like styling, no animation or image handling, no npm at runtime.
+
+### JSX, revisited
+
+That list used to begin "no JSX, no React component model", and it no longer does. Worth writing down why the reversal is not a reversal of the argument above.
+
+Everything that made lvgljs unportable is *where* its component model lives: in C, on top of txiki.js and libuv, reaching the screen through a Linux framebuffer, with `react-reconciler` from npm compiled in. The idea it implements — describe the screen as a function of state, diff, mutate the minimum — has no such requirements. It is an algorithm over a widget tree, and it runs fine in the JavaScript that is already here.
+
+So [`app/lib/ui.js`](../app/lib/ui.js) is that algorithm and nothing else: about 400 lines of plain JavaScript in the app layer, bundled into the apps that want it by a build step with no dependencies. The firmware gained two widget methods (`.delete()`, `.index()`, about twenty lines) that imperative scripts wanted anyway, and nothing else. Flash cost is zero, resting cost is zero, and an app that ignores it pays nothing.
+
+The claim the firmware makes is therefore narrower than it was, and still exactly true: **there is no JSX, no React and no virtual DOM in the firmware.** The full picture is in [`ui-runtime.md`](ui-runtime.md).
+
+This is the same move the project made in the first place, applied one layer up. Keep the idea, drop the machinery it arrived in.
 
 ## Budget: estimated versus actual
 
@@ -52,7 +64,7 @@ That ordering was the single most useful decision. The one question that could h
 |---|---|
 | QuickJS build friction on Xtensa | **Mild.** Five one-line type fixes where `int` locals meet `int32_t*` parameters, because this toolchain types `int32_t` as `long`. The JerryScript escape hatch was never needed. |
 | `JSValue` lifetime bugs | **The real risk, and it stayed the hardest part.** Handled by the `LV_EVENT_DELETE` hook plus a global registry for screen-level bindings; five consecutive reload cycles leaked no internal RAM. One hazard emerged later than the design: `.clean()` made widget handles capable of dangling within a single run, and writing through a stale one silently corrupted the heap. Since hardened: `arg_widget()` validates with `lv_obj_is_valid()` and throws a catchable `TypeError`, at no measurable frame cost. See [`runtime-architecture.md`](runtime-architecture.md). |
-| Scope creep | **Held, then spent deliberately.** v1 shipped at roughly 15 functions. Parity with the C demo added tabview, chart, `.bounds()`, `.clean()`, `.push()` and `.addTab()`, taking it to about 20; `fs`, `fetch`, text input, and the app model took it to 11 widget makers plus around 30 module functions. Each step answered a concrete need rather than a speculative one, which is the distinction worth keeping: the surface grew where leaving it alone would have pushed the same work onto every app. |
+| Scope creep | **Held, then spent deliberately.** v1 shipped at roughly 15 functions. Parity with the C demo added tabview, chart, `.bounds()`, `.clean()`, `.push()` and `.addTab()`, taking it to about 20; `fs`, `fetch`, text input, and the app model took it to 11 widget makers plus around 30 module functions, and a forms-and-status set (bar, checkbox, roller, dropdown, spinner, led) took the widgets to 17. Each step answered a concrete need rather than a speculative one, which is the distinction worth keeping: the surface grew where leaving it alone would have pushed the same work onto every app. |
 | PSRAM latency for the JS heap | **Non-issue.** JavaScript runs at event rate, not pixel rate, exactly as predicted. |
 
 One risk was not predicted and should have been. QuickJS's pending-job queue is normally drained by quickjs-libc's event loop, which isn't vendored here, so promises and `async`/`await` queued silently and never ran while everything else worked. The lesson generalizes: when you vendor a runtime's core and drop its host layer, enumerate what that host layer was doing for you.
@@ -60,3 +72,5 @@ One risk was not predicted and should have been. QuickJS's pending-job queue is 
 ## What this is not
 
 Not an lvgljs port, not React, not npm. It is "MicroPython-style scripting, but JavaScript": the 20% of lvgljs that delivers 80% of the point, which is UI logic as editable data. It was built for this board and has only run on this board, but nothing above the sketch knows which panel it is drawing on. See [`portability.md`](portability.md) for what that does and doesn't buy.
+
+The component runtime does not change that sentence. It is React-*shaped*, not React: no reconciler from npm, no fibers, no scheduler, no context, no error boundaries, and about 400 lines against React's tens of thousands. It sits in the app layer, where a script can take it or leave it, precisely so this stays true of the firmware.

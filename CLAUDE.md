@@ -30,6 +30,7 @@ Build/flash (`flash.ps1` encodes the FQBN and finds the port):
 .\flash.ps1                         # the firmware: -BuildOnly, -Port COMx, -Monitor, -Board <name>
 cd experiments/c-dashboard; .\flash.ps1   # the frozen C dashboard; same flags
 .\push.ps1 app\apps\weather.js      # send one script over serial (never paste by hand)
+node tools/build-app.mjs            # app/src/*.jsx -> app/apps/*.js, before pushing a JSX app
 ```
 
 Manual `arduino-cli compile` must link the two vendored libraries explicitly, since they sit in `firmware/` rather than in the Arduino libraries folder:
@@ -43,9 +44,14 @@ What CI (`.github/workflows/ci.yml`) actually checks, without hardware:
 ```powershell
 node --check app/**/*.js                 # syntax-check every script
 node tools/check-js-api.mjs              # fail if a script calls a binding the C layer doesn't register
+node tools/test-jsx.mjs                  # the JSX transform
+node tools/test-ui.mjs                   # the component runtime, against a fake lv
+node tools/build-app.mjs --check         # fail if a committed app/apps/*.js is stale
 ```
 
-What CI *cannot* do: run `app/selftest.js`, the real functional test — it executes on the board and reports over serial, so it needs hardware (deploy it in place of `app.js` and read the serial log, or wire up a self-hosted runner). There is no hosted way to test the UI end-to-end; changes to the binding layer or hardware glue need a real board.
+What CI *cannot* do: run `app/selftest.js`, the real functional test of the binding layer — it executes on the board and reports over serial, so it needs hardware (deploy it in place of `app.js` and read the serial log, or wire up a self-hosted runner). `app/ui-selftest.js` is the same shape for the component runtime. Changes to the binding layer or hardware glue need a real board; the JSX layer is mostly coverable without one, because it is pure JavaScript over `lv` calls that `tools/lv-mock.mjs` can fake.
+
+One trap the PC-side checks cannot catch on their own: **Node accepts control characters (a raw NUL) inside a string literal and QuickJS does not**, so such a file passes `node --check`, pushes with a matching checksum, and then fails to evaluate on the panel with a syntax error on a line that looks fine. `tools/build-app.mjs` rejects them; nothing else does.
 
 ## Architecture
 
@@ -60,6 +66,8 @@ What CI *cannot* do: run `app/selftest.js`, the real functional test — it exec
 
 **`app/`** — `app.js` is the launcher shipped to the board; `apps/*.js` are individual apps (`sys.launch(path)` switches between them); `selftest.js` is the on-hardware binding-layer test, deployed in place of `app.js`.
 
+`lib/ui.js` and `src/*.jsx` are the optional component layer: JSX with React-style hooks and a reconciler, written in JavaScript over the same `lv` bindings, bundled into an app by `tools/build-app.mjs`. **The firmware knows nothing about it** — that is the whole design, and the reason `docs/design-rationale.md` can still say the firmware has no JSX, no React and no virtual DOM while apps can be written with all three. Two firmware methods exist for it (`.delete()`, `.index()`) and are useful imperatively too. Outputs under `app/apps/` and `app/ui-selftest.js` are **generated and committed** (the card layout is what ships), so edit `app/src/*.jsx` and rebuild; CI fails on a stale output. A source can redirect its output with a `// @out <path>` line, which is how `ui-selftest` stays out of the launcher's app list and how `app.jsx` builds to `app/app.js`. **Every shipped app is now a port**; each one's pre-port original is frozen in `tools/fixtures/` and `tools/test-parity.mjs` fails if a port stops building the same widget tree. `app/selftest.js` stays imperative on purpose, since it is the test of the bindings themselves. Full model and limits: `docs/ui-runtime.md`.
+
 Script boot order: the pinned app if one is set (`sys.pin()` / the `pin` serial command, stored in NVS) → `/app.js` on the SD card → `/app.js` on the flash FATFS partition → a built-in fallback screen. A pin also suppresses the firmware's corner button while the pinned app runs, so BOOT long-press is the only way back to the launcher on a pinned board. Edit loop: edit on PC → reinsert card → long-press BOOT (≥700 ms) to reload, no recompile.
 
 A pin is exactly those two effects, what boots and what the firmware draws over it. It is **not** a restriction on what can run: the launcher is still reachable by BOOT long-press and still launches anything in `/apps`, where a tap runs an app without touching the pin and a long-press silently retargets the pin to that app. So there is no single-app-only mode in this firmware, and "appliance" describes a default rather than a lockdown. `sys.pin()` accepts any absolute path, including `/app.js`, while the serial `pin` command refuses the launcher; that asymmetry is real and deliberate on the serial side only. Nothing on screen teaches the BOOT long-press, which is the known discoverability gap.
@@ -68,7 +76,7 @@ The bottom-right corner is one firmware-owned slot on `lv_layer_top()` holding a
 
 `jsvm_network_setup_needed()` is true when the running script used `fetch()`/`wifi.status()`, is not connected, and the failure is one a person can fix: nothing saved, a rejected password, or a network missing for 6 retry attempts (≈64 s). Transient failures stay hidden so the supervisor can retry and the app can just say "offline" — that split lives in `failure_needs_a_person()` in `bindings_wifi.cpp`, keyed on the same reason codes as `reason_name()`, so the two must stay in agreement.
 
-**JS binding surface** (`lv`, `sys`, `fs`, `wifi`, `fetch`, `console` — full reference in `docs/binding-api.md`): 11 widget makers plus ~30 module functions, curated rather than a full binding. Key invariants when changing the binding layer (`firmware/lvgl-js-bindings/src`):
+**JS binding surface** (`lv`, `sys`, `fs`, `wifi`, `fetch`, `console` — full reference in `docs/binding-api.md`): 17 widget makers plus ~30 module functions, curated rather than a full binding. Key invariants when changing the binding layer (`firmware/lvgl-js-bindings/src`):
 - Callbacks passed to `.on()`/`lv.timer()` are retained with `JS_DupValue` and released exactly once, via an `LV_EVENT_DELETE` hook or `.stop()`.
 - Widget handles are weak pointers; using one after its container is `.clean()`'d throws a JS `TypeError` rather than corrupting memory.
 - Teardown order on reload is fixed: JS timers → `lv_obj_clean(screen)` → screen-level bindings → JS context → runtime.

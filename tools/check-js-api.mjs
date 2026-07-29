@@ -76,6 +76,30 @@ function* scripts(dir) {
 }
 
 let problems = 0;
+
+// The component runtime reaches its widgets through lv[tag](), which the scan
+// below cannot see, so its tag table is checked against the makers directly.
+// Without this, dropping a maker from C would break every JSX app using that
+// element with nothing failing until the panel showed it.
+const RUNTIME = "app/lib/ui.js";
+try {
+  const text = readFileSync(RUNTIME, "utf8");
+  const block = text.match(/HOST_TAGS\s*=\s*\[([\s\S]*?)\]/);
+  if (!block) {
+    console.error(`${RUNTIME}  HOST_TAGS is gone — this check can no longer see the element list`);
+    problems++;
+  } else {
+    for (const m of block[1].matchAll(/"(\w+)"/g)) {
+      if (!surface.lv.has(m[1])) {
+        console.error(`${RUNTIME}  <${m[1]}> has no lv.${m[1]}() maker behind it`);
+        problems++;
+      }
+    }
+  }
+} catch {
+  // No runtime in the tree is fine; it is an app-layer library, not firmware.
+}
+
 for (const file of scripts(SCRIPTS)) {
   const text = readFileSync(file, "utf8");
 

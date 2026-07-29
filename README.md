@@ -14,6 +14,10 @@ Two Arduino libraries plus one sketch per board. [`quickjs-ng/`](firmware/quickj
 
 `app.js` is the launcher, which lists `apps/*.js` and runs whichever you tap. Deploy by copying to an SD card and long-pressing BOOT (≥700 ms), or push over serial with `.\push.ps1`. `selftest.js` is the on-hardware test of the binding surface. Script API: [`docs/binding-api.md`](docs/binding-api.md).
 
+Apps can be written two ways. Directly against the bindings, which is what [`docs/binding-api.md`](docs/binding-api.md) documents and what [`app/selftest.js`](app/selftest.js) still does. Or as JSX components with hooks, which is what every shipped app now does: `src/*.jsx` builds to `apps/*.js` with `node tools/build-app.mjs`, using the reconciler in [`app/lib/ui.js`](app/lib/ui.js). That layer is pure JavaScript over the same bindings and adds nothing to the firmware — see [`docs/ui-runtime.md`](docs/ui-runtime.md).
+
+Both remain supported. The pre-port version of each app is frozen in [`tools/fixtures/`](tools/fixtures/) as the baseline a parity test compares against, so the imperative style stays readable side by side with what replaced it.
+
 ### [`experiments/c-dashboard/`](experiments/c-dashboard/README.md) — frozen
 
 A complete 4-tab LVGL dashboard (heap chart, touch tester, WiFi scanner, system panel) compiled into a single firmware image, with no scripting. This is where the display pipeline and touch driver were first proven on hardware, which is why it is kept rather than deleted. It is frozen: it gets no new features, and it is not developed toward parity with the JS platform.

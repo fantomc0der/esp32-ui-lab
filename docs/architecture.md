@@ -8,11 +8,15 @@ A scriptable firmware platform: the compiled part is flashed once and rarely cha
 
 The first is **firmware against apps**. `firmware/` is everything that gets flashed; `app/` is data it reads. Changing an app means saving a file and long-pressing a button, about a second, with no compiler involved.
 
+Inside `app/`, one more split is worth knowing but is not a seam in the same sense: `app.js` and `apps/*.js` are what the board loads, and `src/*.jsx` plus `lib/ui.js` are an optional way of producing them. The component runtime is a JavaScript library over the binding surface, built into an app by [`tools/build-app.mjs`](../tools/build-app.mjs); the firmware neither knows nor cares. See [`ui-runtime.md`](ui-runtime.md).
+
 The second is **platform against board**. Inside `firmware/`, the two Arduino libraries (`quickjs-ng/`, `lvgl-js-bindings/`) contain no pin numbers, no resolution, and no panel name; `boards/<name>/` contains nothing but those. A new board is a pinout, a display bring-up, three host hooks, and a config struct: 189 lines here.
 
 That seam is drawn at hardware, not at "compiled versus scripted". Which file boots, what happens when it throws, the button that gets you out of an app, the serial upload protocol: all of that is compiled C, and none of it depends on the panel, so it sits on the library side in `jsvm_app.cpp`. It was in the sketch until a port attempt had to copy it and the two copies diverged.
 
 ```
+              app/src/*.jsx + app/lib/ui.js            optional, built on the PC
+                              ▼                        tools/build-app.mjs
                         app/  app.js, apps/*.js        data on SD or FATFS
                               ▼
                         QuickJS-ng VM                  firmware/quickjs-ng/

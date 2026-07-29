@@ -4,20 +4,22 @@ Script an [LVGL 9](https://lvgl.io) UI in JavaScript on the ESP32, using a Quick
 
 > Independent implementation, **not** a port of and not affiliated with [lvgl/lv_binding_js](https://github.com/lvgl/lv_binding_js). That project targets embedded Linux and depends on libuv, curl, and txiki.js, none of which fit a FreeRTOS microcontroller. This library keeps the same idea (engine in firmware, hand-written bindings over LVGL's C API, scripts as data) and drops the POSIX layers. The full comparison is in [`docs/design-rationale.md`](../../docs/design-rationale.md).
 
-**There is no JSX, no React, and no virtual DOM here** — that is the other half of what was dropped. Scripts are plain imperative JavaScript that build widgets directly:
+**There is no JSX, no React, and no virtual DOM in this library** — that is the other half of what was dropped, and it stays dropped: the binding surface is imperative, and scripts build widgets directly.
 
 ```js
 const btn = lv.button(lv.screen(), { text: "Scan", w: 84, align: "top-left" });
 btn.on("click", () => console.log("tapped"));
 ```
 
+A component model does exist a layer up, in [`app/lib/ui.js`](../../app/lib/ui.js): JSX with hooks and a reconciler, written in JavaScript against exactly the API below and bundled into the apps that ask for it. It costs this library nothing — no flash, no dependency, no second code path — which is the point of it living there rather than here. See [`docs/ui-runtime.md`](../../docs/ui-runtime.md).
+
 ## What scripts get
 
 | | |
 |---|---|
-| Widgets | `lv.obj`, `lv.button`, `lv.label`, `lv.slider`, `lv.switch`, `lv.arc`, `lv.list`, `lv.chart`, `lv.tabview`, `lv.textarea`, `lv.keyboard`, plus `lv.screen()` for the root |
+| Widgets | `lv.obj`, `lv.button`, `lv.label`, `lv.slider`, `lv.bar`, `lv.switch`, `lv.checkbox`, `lv.arc`, `lv.list`, `lv.chart`, `lv.tabview`, `lv.textarea`, `lv.keyboard`, `lv.roller`, `lv.dropdown`, `lv.spinner`, `lv.led`, plus `lv.screen()` for the root |
 | Props | size (px, `"50%"`, `"content"`), `align`/`x`/`y`, `flex`/`flexAlign`, text, colors, font, `range`, `value`, padding, borders, and a few per-widget extras |
-| Methods | `.set()`, `.on()` (click, change, press, pressing, longpress), `.value()`, `.bounds()`, `.clean()`, plus `.add()`, `.addTab()`, `.push()`, `.target()` on the widgets that take them |
+| Methods | `.set()`, `.on()` (click, change, press, pressing, longpress), `.value()`, `.bounds()`, `.clean()`, `.delete()`, `.index()`, plus `.add()`, `.addTab()`, `.push()`, `.target()` on the widgets that take them |
 | Timers | `lv.timer(ms, fn)`, returning a handle with `.stop()` |
 | Device | `sys` (heap, battery, uptime, fps, backlight, chip info, launch/pin), `wifi` (status, save, scan), `console.log` |
 | Storage & network | `fs` (read, write, append, list, mkdir…) and `fetch(url)` returning a `Promise` |

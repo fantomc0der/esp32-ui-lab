@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: fantomc0der <michael.w.weisz@gmail.com>
+Date: Thu, 30 Jul 2026 18:43:08 -0400
+Subject: [PATCH] xtensa: int32 pointer types
+
+On the Xtensa toolchain used by ESP-IDF (xtensa-esp32s3-elf-gcc), int32_t
+is typedef'd to `long int`, not `int`. The two are both 32 bits wide but
+they are distinct types to the compiler, so passing an `int *` where an
+`int32_t *` is expected (or the reverse) is an incompatible-pointer-types
+error. GCC 14 promoted that diagnostic from a warning to an error, so
+quickjs.c no longer builds for ESP32 targets.
+
+Five locals in quickjs.c are declared with the type that does not match
+the API they are passed to. On x86-64 Linux, where int32_t is `int`, the
+mismatch is invisible; everywhere int32_t is `long` it is fatal.
+
+Four are declared `int` but passed to a function taking `int32_t *`:
+  - `v` in find_line_num(), passed to get_sleb128()
+  - `radix` in js_parseInt(), passed to JS_ToInt32()
+  - `remainingElementsCount` in remainingElementsCount_add(), passed to
+    JS_ToInt32Free()
+  - `index` in js_promise_all_resolve_element(), passed to JS_ToInt32()
+
+The fifth goes the other way, declared `int32_t` but passed to a function
+taking `int *`:
+  - `count` in js_atomics_notify(), passed to JS_ToInt32Clamp()
+
+Give each local the type its callee's parameter actually requires. All
+five are 32-bit signed integers either way, so there is no behavioural
+change and no codegen change on targets where int32_t is already int.
+---
+ quickjs.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/quickjs.c b/quickjs.c
+index 11caae0..20abb36 100644
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -7673,7 +7673,8 @@ static int find_line_num(JSContext *ctx, JSFunctionBytecode *b,
+                          uint32_t pc_value, int *col)
+ {
+     const uint8_t *p_end, *p;
+-    int new_line_num, new_col_num, line_num, col_num, pc, v, ret;
++    int new_line_num, new_col_num, line_num, col_num, pc, ret;
++    int32_t v;  /* get_sleb128 takes int32_t*; on xtensa int32_t is long */
+     unsigned int op;
+ 
+     *col = 1;
+@@ -45537,7 +45538,8 @@ static JSValue js_parseInt(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+ {
+     const char *str, *p;
+-    int radix, flags;
++    int32_t radix;  /* xtensa: int32_t is long, keep pointer types matching JS_ToInt32 */
++    int flags;
+     JSValue ret;
+ 
+     str = JS_ToCString(ctx, argv[0]);
+@@ -54829,7 +54831,7 @@ static __exception int remainingElementsCount_add(JSContext *ctx,
+                                                   int addend)
+ {
+     JSValue val;
+-    int remainingElementsCount;
++    int32_t remainingElementsCount;  /* xtensa: int32_t is long, matches JS_ToInt32Free */
+ 
+     val = JS_GetPropertyUint32(ctx, resolve_element_env, 0);
+     if (JS_IsException(val))
+@@ -54860,7 +54862,8 @@ static JSValue js_promise_all_resolve_element(JSContext *ctx,
+     JSValueConst resolve = func_data[3];
+     JSValueConst resolve_element_env = func_data[4];
+     JSValue ret, obj;
+-    int is_zero, index;
++    int is_zero;
++    int32_t index;  /* xtensa: int32_t is long, matches JS_ToInt32 */
+ 
+     if (JS_ToInt32(ctx, &index, func_data[1]))
+         return JS_EXCEPTION;
+@@ -61323,7 +61326,8 @@ static JSValue js_atomics_notify(JSContext *ctx,
+ {
+     struct list_head *el, *el1, waiter_list;
+     int size_log2;
+-    int32_t count, n;
++    int count;  /* JS_ToInt32Clamp takes int*; on xtensa int32_t is long */
++    int32_t n;
+     void *ptr;
+     uint64_t idx;
+     JSObject *p;

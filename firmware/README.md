@@ -17,6 +17,8 @@ The MCU never runs JS natively; the flashed firmware is still C, but it contains
 ```
 firmware/
   quickjs-ng/                     the vendored JS engine (v0.15.1), an Arduino library
+    src/                          upstream sources, already patched
+    patches/                      the local delta, replayed by tools/vendor-quickjs.ps1
   lvgl-js-bindings/               the bindings plus the app supervisor — board-agnostic
   boards/
     waveshare-s3-touch-147/       one sketch per board: pinout, display bring-up, 3 hooks

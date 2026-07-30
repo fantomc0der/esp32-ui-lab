@@ -16,6 +16,8 @@ The design principle here is that **the gate is the ruleset on `main`, not a wor
 
 Conversation resolution is the condition that surprises people, because nothing in the check list shows it. A review that votes `REVIEW: PASS` and leaves non-blocking inline remarks turns `review` green and still holds the merge: the PR reports `BLOCKED` with `mergeable: MERGEABLE` and every check green. Reply to each thread saying what you did about it and resolve it, and the merge proceeds. Outdated threads, whose lines are no longer in the diff, count the same as current ones.
 
+That condition is also why the review prompt tells Claude to reserve inline comments for findings that block. An inline comment is a merge gate here regardless of how it is labelled, so "non-blocking inline comment" is a contradiction: the label says the merge may proceed and the ruleset says it may not. Non-blocking observations belong in the summary comment, which gates nothing. Anyone editing the prompt should keep that split, because loosening it does not merely add noise, it adds merge conditions.
+
 If anything fails, nothing happens and the PR stays open. Push more commits, the review re-runs on `synchronize`, and GitHub re-evaluates. If you decide mid-review that a PR needs more work, convert it back to a draft.
 
 ## Files

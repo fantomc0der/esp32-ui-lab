@@ -111,7 +111,11 @@ That is a security control, and the right one. Without it a pull request could r
 
 The practical effect: a PR touching this file gets no verdict comment, the verdict step fails closed, `review` goes red, and the required check blocks the merge. Drop `review` from the ruleset's required checks, merge, then add it back. Keep such PRs small and separate from functional changes, because the diff genuinely goes unreviewed.
 
-Failing closed is worth preserving here. Treating a missing verdict as a pass would let a PR that edits the review workflow merge unreviewed, which is precisely the attack the validation exists to prevent.
+**How the refusal actually surfaces is worth knowing, because it is not what it sounds like.** The action does not fail. It emits a warning, logs `Exiting due to workflow validation skip`, and the step **succeeds** (observed in run `30510145596`). So the implicit `success()` guard does not protect anything here: every later step runs, and the verdict step is the only thing standing between a workflow-touching PR and a green check.
+
+That is what makes binding the verdict to its run load-bearing rather than defensive. The sticky comment survives the whole PR, so on a PR that had already been reviewed once, an earlier round's `REVIEW: PASS` was still sitting there when the workflow-touching commit was pushed. The action would skip, write nothing, and a scrape that only asked "is there a PASS on this PR" would find that one and go green, arming auto-merge on an unreviewed edit to the review workflow itself. Precisely the attack the validation exists to prevent, reached through the gate rather than around it. Requiring the verdict to carry the current run's id closes it: the skipped run writes no comment, so there is no verdict belonging to it, so the check stays red.
+
+Failing closed is worth preserving here. Treating a missing verdict as a pass would let a PR that edits the review workflow merge unreviewed. So would treating a *stale* verdict as a current one, which is the same hole wearing a disguise.
 
 ## Overriding the automation
 

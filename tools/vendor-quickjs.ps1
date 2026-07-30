@@ -161,9 +161,13 @@ try {
         throw "git am failed: the patches do not apply to the pinned baseline $BaselineSha. $_"
     }
 
+    # `--onto <target> <baseline>` rather than a plain `rebase <target>`: this replays exactly the
+    # commits sitting on top of the baseline, whatever the ancestry between the two. A plain rebase
+    # onto a target that is an *ancestor* of the baseline is a silent no-op ("up to date"), which
+    # leaves upstream's own commits in the range and makes format-patch emit them as local patches.
     Write-Host "Rebasing local commits onto $Target ($targetSha) ..."
     try {
-        Invoke-Git -Arguments ($idArgs + @('rebase', $targetSha)) -WorkingDirectory $ClonePath
+        Invoke-Git -Arguments ($idArgs + @('rebase', '--onto', $targetSha, $BaselineSha)) -WorkingDirectory $ClonePath
     } catch {
         $hint = if ($KeepWorkspace) { "Workspace kept at $ClonePath" } else { "Re-run with -KeepWorkspace to inspect the conflict" }
         & git -C $ClonePath rebase --abort 2>$null
@@ -179,15 +183,24 @@ try {
     Write-Host "Recording version $Version at $targetSha"
 
     Write-Host "Regenerating patches against the new baseline ..."
+    # Generate into a scratch directory and swap only once the count checks out, so a surprise
+    # here leaves patches/ exactly as it was instead of half-rewritten.
+    $patchOut = Join-Path $Workspace 'patches-out'
+    New-Item -ItemType Directory -Force -Path $patchOut | Out-Null
+    Invoke-Git -Arguments @('format-patch', '--no-numbered', '--zero-commit', '--no-signature',
+                            '-o', $patchOut, $targetSha) -WorkingDirectory $ClonePath
+    $regenerated = @(Get-ChildItem -LiteralPath $patchOut -Filter '*.patch' | Sort-Object Name)
+    if ($regenerated.Count -ne $patches.Count) {
+        throw ("Expected $($patches.Count) regenerated patch(es), got $($regenerated.Count). " +
+               "The rebase left a different set of commits on top of $Target than the patches it " +
+               "started from. patches/ is untouched.")
+    }
     # Enumerate and delete, rather than passing a wildcard: -LiteralPath would take `*.patch`
     # literally and -Path errors when nothing matches. Old patches must go, or a run whose
     # subject line changed would leave the previous file behind next to the new one.
     Get-ChildItem -LiteralPath $PatchDir -Filter '*.patch' | Remove-Item -Force
-    Invoke-Git -Arguments @('format-patch', '--no-numbered', '--zero-commit', '--no-signature',
-                            '-o', $PatchDir, $targetSha) -WorkingDirectory $ClonePath
-    $regenerated = @(Get-ChildItem -LiteralPath $PatchDir -Filter '*.patch')
-    if ($regenerated.Count -ne $patches.Count) {
-        throw "Expected $($patches.Count) regenerated patch(es), got $($regenerated.Count)"
+    foreach ($p in $regenerated) {
+        [System.IO.File]::Copy($p.FullName, (Join-Path $PatchDir $p.Name), $true)
     }
 
     Write-Host "Copying $($Manifest.Count) files into src/ ..."

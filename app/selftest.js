@@ -363,8 +363,19 @@ check("sys.backlight rejects a missing argument", () => {
 check("sys.backlight rejects undefined", () => {
   try { sys.backlight(undefined); return false; } catch (e) { return e instanceof TypeError; }
 });
-check("sys.backlight rejects a non-number", () => {
-  try { sys.backlight("bright"); return false; } catch (e) { return e instanceof TypeError; }
+// null is the one worth having on hardware: JSON has no undefined, so a config
+// read off the card with a missing brightness arrives here as null, and JS would
+// convert it to 0.
+check("sys.backlight rejects null", () => {
+  try { sys.backlight(null); return false; } catch (e) { return e instanceof TypeError; }
+});
+check("sys.backlight rejects a string", () => {
+  try { sys.backlight("80"); return false; } catch (e) { return e instanceof TypeError; }
+});
+check("sys.backlight still accepts 0 deliberately", () => {
+  sys.backlight(0);
+  sys.backlight(80);
+  return true;
 });
 check("console.log accepts many args", () => { console.log("  (console ok)", 1, true); return true; });
 

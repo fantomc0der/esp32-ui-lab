@@ -43,19 +43,29 @@ static JSValue js_sys_fps(JSContext *ctx, JSValueConst, int, JSValueConst *) {
 // write-only and the board keeps no readable level. Every other sys reading is
 // a no-argument getter, so `sys.backlight()` reads like one too; answering that
 // as a set-to-zero dims the panel to its PWM floor, which looks like a crashed
-// board rather than a mistake in the script. Anything that is not a number is
-// refused for the same reason: 0 is a legal level, so it cannot double as the
-// value a failed conversion leaves behind.
+// board rather than a mistake in the script.
+//
+// So the argument has to actually be a number, and every other type is refused
+// rather than converted. JS conversion sends too many things to 0, which is the
+// one value that must not be reachable by accident: null, false and "" all
+// become it, true becomes 1, and none of those is a level anyone meant to ask
+// for. 0 itself stays perfectly askable, it just has to be asked for as 0. A
+// string has to be converted by the caller, because "" and "  " are 0 too.
 static JSValue js_sys_backlight(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
-  if (argc < 1 || JS_IsUndefined(argv[0]))
-    return JS_ThrowTypeError(ctx, "backlight(pct) needs a percent");
-  // Read as a double rather than with JS_ToInt32, which converts NaN and a
-  // non-numeric string to 0 without setting an exception. Those reach the panel
-  // as the same dark screen, by a likelier route than the zero-argument call:
-  // sys.backlight(cfg.brightness) with the key missing.
+  if (argc < 1) return JS_ThrowTypeError(ctx, "backlight(pct) needs a percent");
+  // Checked as a type before any conversion. JS_ToFloat64 would report success
+  // for most of what this rejects: it fast-paths null and the booleans straight
+  // to 0 and 1 without calling ToNumber at all, so nothing downstream could tell
+  // them from a script that asked for those levels.
+  if (!JS_IsNumber(argv[0]))
+    return JS_ThrowTypeError(ctx, "backlight(pct) needs a number%s",
+                             JS_IsString(argv[0]) ? ", so convert the string first" : "");
+  // Cannot fail for a number, but a conversion result is checked rather than
+  // discarded, which is what let the original bug through.
   double pct = 0;
   if (JS_ToFloat64(ctx, &pct, argv[0])) return JS_EXCEPTION;
-  if (isnan(pct)) return JS_ThrowTypeError(ctx, "backlight(pct) needs a number");
+  // NaN passes the type check and is still not a level.
+  if (isnan(pct)) return JS_ThrowTypeError(ctx, "backlight(pct) needs a number, not NaN");
   // Clamped as a double on purpose: casting an out-of-range one to an integer
   // type is undefined behaviour, so 1e300 has to lose its range before the cast.
   if (pct < 0) pct = 0;

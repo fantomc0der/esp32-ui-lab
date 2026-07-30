@@ -44,9 +44,10 @@ Copy this checklist and check items off as you go:
 - [ ] Step 4: CI green on the draft
 - [ ] Step 5: Marked ready for review
 - [ ] Step 6: `review` check green
-- [ ] Step 7: Merge confirmed
-- [ ] Step 8: Branch cleaned up
-- [ ] Step 9: Reported to the user
+- [ ] Step 7: Every review thread answered and resolved
+- [ ] Step 8: Merge confirmed
+- [ ] Step 9: Branch cleaned up
+- [ ] Step 10: Reported to the user
 ```
 
 ### Step 1 — Create the branch, before any code is written
@@ -142,7 +143,7 @@ gh pr view <PR> --json comments \
 
 #### If the `review` check is green
 
-Proceed to Step 7. Auto-merge has already been armed by the downstream job in the same workflow run.
+Proceed to Step 7. Auto-merge has already been armed by the downstream job in the same workflow run, but a green review is not the last gate: any inline comment it left is an open conversation, and those block the merge on their own.
 
 #### If the `review` check is red
 
@@ -158,9 +159,59 @@ The review is prompted to vote FAIL when torn on a `firmware/` change, precisely
 
 After making fixes: commit, push, and let CI (Step 4) and the review (Step 6) re-run on `synchronize`. Repeat until `review` is green. If the same issue survives two fix attempts and you are not making progress, stop and surface it to the user rather than looping.
 
-### Step 7 — Wait for the merge
+### Step 7 — Answer every review thread, then resolve it
 
-Nothing in this repo merges the PR. GitHub does, once every required check on the head SHA is green, the PR is not a draft, and the branch is up to date with `main`. Confirm auto-merge is armed, then wait:
+The ruleset on `main` requires conversation resolution, so a single unresolved review thread holds the merge shut no matter how green everything else is. This is easiest to miss on a PASS: all checks pass, auto-merge is armed, and the PR still reports `BLOCKED` with nothing in the check list to explain it. A review that votes PASS while leaving non-blocking inline remarks produces exactly that state, so treat this step as part of every run rather than as something only failed reviews need.
+
+Resolution status is not in the REST comments endpoint, so list the threads over GraphQL:
+
+```bash
+gh api graphql -f query='
+{
+  repository(owner: "OWNER", name: "REPO") {
+    pullRequest(number: PR) {
+      reviewThreads(first: 50) {
+        nodes { id isResolved isOutdated path line comments(first: 1) { nodes { databaseId author { login } } } }
+      }
+    }
+  }
+}' --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+         | "\(.id)\tresolved=\(.isResolved)\toutdated=\(.isOutdated)\t\(.path):\(.line)"'
+```
+
+For each unresolved thread, reply first and resolve second. Both halves matter: the reply is what a later reader and the next review see, and resolving without one leaves the merge unblocked but the reasoning nowhere.
+
+**Reply on the thread, not at top level.** A reply keeps the answer next to the remark it answers, which is what makes a re-review able to tell an addressed point from a new one:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/<PR>/comments/<parent-comment-id>/replies -f body='...'
+```
+
+Say which way the decision went and why, in a sentence or two. The useful shapes:
+
+- **Fixed.** Name the commit, so the change can be read without hunting for it, and say what you did if it differs from what was suggested. "Fixed in `<sha>`" alone is thin when the fix took a different route.
+- **Changed, but wider or narrower than suggested.** Say what you took and what you left, and why the boundary is there.
+- **Deliberately unchanged.** Give the reason and point at where it is already argued, such as being out of scope per the PR description or a trade-off the description makes explicitly. "Out of scope" with nothing behind it reads as a dismissal.
+- **Disagreed.** Say what makes the finding wrong and how you established it. A measurement settles it, and the review is instructed to drop a finding an author's measurement contradicts.
+- **Partly addressed.** Say which part is done, and leave the thread open for the rest.
+
+**Then resolve, but only what is genuinely finished:**
+
+```bash
+gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_..."}) { thread { isResolved } } }'
+```
+
+Resolving is a claim that the thread needs no further attention, and it is the one action here that removes a merge gate, so it deserves more care than the reply does. Resolve when the point is fixed, or when it was a preference you have answered and nothing is pending. Leave it open when you have just changed the code the remark is about and want the next review to look, or when you have replied with a disagreement nobody has answered yet.
+
+An **outdated** thread (`isOutdated: true`, its anchor line no longer in the diff) still blocks the merge. It needs the same two steps, not fewer: reply saying where that code went, then resolve.
+
+When a thread genuinely needs the review workflow to look again, get a real re-review rather than resolving on your own judgment, and know what does and does not cause one. A reply, and `@claude` in a comment, do **not** run the review: `claude-review.yml` fires only on `pull_request` events (`opened`, `reopened`, `ready_for_review`, `synchronize`), while `@claude` triggers `claude-fix.yml`. That path re-reviews only if it pushes a commit, because the push is what fires `synchronize`. So a comment alone re-reviews nothing, and the only reliable way to get a fresh verdict is a new commit. If a thread needs a verdict and no code is changing, say so to the user instead of resolving to clear the gate.
+
+`arm auto-merge` needs no attention here. It runs once per reviewed commit that passed, never on a FAIL, and its first step exits early when auto-merge is already set, so it cannot double-arm. Worth knowing that arming is sticky: a PR armed by an earlier commit stays armed after a later push that the review fails, and what holds the merge then is the red `review` check rather than any disarming. "Armed" is therefore not evidence that the current commit passed.
+
+### Step 8 — Wait for the merge
+
+Nothing in this repo merges the PR. GitHub does, once every required check on the head SHA is green, every review thread is resolved, the PR is not a draft, and the branch is up to date with `main`. Confirm auto-merge is armed, then wait:
 
 ```bash
 gh pr view <PR> --json autoMergeRequest --jq '.autoMergeRequest'
@@ -184,13 +235,20 @@ gh pr view <PR> --json state,mergedAt,mergeCommit \
 
 If it is still open after a few minutes with everything green, diagnose in this order:
 
-1. **Is `review` actually a required check?** `gh api repos/{owner}/{repo}/rulesets --jq '.[].id'` then read the ruleset. If the required checks are only `scripts` and `firmware`, the manual setup step in `docs/pr-automation.md` was never done. Say so; do not merge manually to paper over it.
+1. **Is a review thread still unresolved?** The likeliest cause by far, and the one the checks do not show: `mergeStateStatus` reports `BLOCKED` while `mergeable` reports `MERGEABLE`, with every check green. Go back to Step 7 and list the threads. Outdated threads count.
 2. **Is auto-merge armed?** If `autoMergeRequest` is null, the `arm auto-merge` job did not run or failed. Check `gh run list --workflow=claude-review.yml --limit 5`.
 3. **Is the branch behind `main`?** The ruleset is strict, so a PR whose base moved sits armed and unmerged until the branch is updated. `gh pr view <PR> --json mergeStateStatus` reports `BEHIND`. Update the branch and let the checks re-run.
+4. **Is `review` actually a required check?** `gh api repos/{owner}/{repo}/rulesets --jq '.[].id'` then read the ruleset. If the required checks are only `scripts` and `firmware`, the manual setup step in `docs/pr-automation.md` was never done. Say so; do not merge manually to paper over it.
+
+Reading the ruleset is what turns a guess into an answer, since it names both the required checks and the conversation-resolution requirement:
+
+```bash
+gh api repos/{owner}/{repo}/rulesets/<id> --jq '.rules[] | {type: .type, params: .parameters}'
+```
 
 Only as a genuine last resort, and after telling the user why, merge by hand with `gh pr merge <PR> --squash`.
 
-### Step 8 — Clean up the branch
+### Step 9 — Clean up the branch
 
 ```bash
 git checkout main
@@ -200,7 +258,7 @@ git branch -d <branch-name>
 
 The remote branch is deleted automatically by the repo's "Automatically delete head branches" setting. Do not run `git push origin --delete`; the branch is already gone and the command will error.
 
-### Step 9 — Report completion
+### Step 10 — Report completion
 
 Tell the user:
 - What was built, in a sentence, and how it differs from the prompt if it does.
@@ -215,5 +273,6 @@ Repo conventions live in `CLAUDE.md` and are not repeated here. These are the ru
 
 - Never open a PR from `main`.
 - Never force-push or skip hooks (`--force`, `--no-verify`) without explicit user instruction.
-- Never merge by hand to get past a stuck gate without telling the user why. A stuck gate usually means a real misconfiguration; see Step 7.
-- Never report a change as verified when only CI ran. See Step 9.
+- Never merge by hand to get past a stuck gate without telling the user why. A stuck gate is usually an unresolved review thread and occasionally a real misconfiguration, and both are worth diagnosing rather than bypassing; see Step 8.
+- Never resolve a review thread without a reply saying what you did about it, and never resolve one to clear the merge gate when the point is still open. Resolving is the one action in this lifecycle that removes a gate on your own authority; see Step 7.
+- Never report a change as verified when only CI ran. See Step 10.

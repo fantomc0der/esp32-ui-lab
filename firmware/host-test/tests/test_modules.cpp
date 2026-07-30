@@ -111,49 +111,59 @@ void sys_backlight_without_an_argument_throws() {
            host_backlight_call_count(), 0);
   check_eq("sys: the level is untouched after a throw", (int)host_backlight(), 100);
 
-  // The same failure with an argument present, which is the likelier route to
-  // it: sys.backlight(cfg.brightness) with the key missing. JS_ToInt32 turned
-  // each of these into 0 and dimmed the panel, and the throwing valueOf also
-  // dropped a pending exception on the way out. 0 cannot be the sentinel for a
-  // failed conversion here, because 0 is a level a script may legitimately ask
-  // for, so each has to be refused before the clamp.
+  // The same failure with an argument present, which is where the likelier
+  // routes are. Every one of these used to reach the host as 0 or 1: JS
+  // conversion sends null, false and "" to 0 without complaint, and the two
+  // fast-pathed ones never even call ToNumber. The config-file shape is the one
+  // worth naming, since JSON has no undefined and a missing brightness arrives
+  // as null. 0 cannot be the sentinel for any of it, because 0 is a level a
+  // script may legitimately ask for, so the type is checked before conversion.
   const char *not_numbers[] = {
       "sys.backlight(undefined)",
+      "sys.backlight(null)",
+      "sys.backlight(true)",
+      "sys.backlight(false)",
       "sys.backlight(NaN)",
+      R"(sys.backlight(""))",
+      R"(sys.backlight("80"))",
       R"(sys.backlight("bright"))",
-      R"(sys.backlight({ valueOf() { throw new Error("nope"); } }))",
+      R"(sys.backlight({ valueOf() { return 50; } }))",
   };
   for (const char *call : not_numbers) {
     host_hooks_reset();
     const std::string src = std::string("let threw = false;\ntry { ") + call +
-                            "; } catch (e) { threw = true; }\n"
+                            "; } catch (e) { threw = e instanceof TypeError; }\n"
                             "console.log('blconv=' + threw);";
-    const std::string name = std::string("sys: ") + call + " throws instead of dimming";
+    const std::string name = std::string("sys: ") + call + " throws";
     expect_output(name.c_str(), src.c_str(), "blconv=true");
-    check_eq((name + ", and never reached the host").c_str(),
+    check_eq((name + ", never reaching the host").c_str(),
              host_backlight_call_count(), 0);
     check_eq((name + ", leaving the level alone").c_str(), (int)host_backlight(), 100);
   }
 
-  // The other edge of insisting on a number: what JavaScript does convert still
-  // converts, so widening the rejection has not swallowed a legal call. Infinity
-  // is here because clamping happens as a double, an out-of-range one being
-  // undefined behaviour to cast. Checked one call per VM, like the clamp cases
-  // above, so none can pass on a value a later call left behind.
+  // The other edge, so the rejection cannot have widened into a legal call. Each
+  // row is seeded with a level that is NOT the one it expects and then counts two
+  // calls, which is what the clamp cases above do and for the same reason: the
+  // Infinity row expects 100, and 100 is both the resting value and whatever an
+  // out-of-range cast might land on if someone deleted the clamp. Seeding is what
+  // keeps that row failing for its own reason rather than by luck.
   struct { const char *call; int want; } converts[] = {
-      {R"(sys.backlight("80"))", 80},
       {"sys.backlight(Infinity)", 100},
       {"sys.backlight(-Infinity)", 0},
-      {"sys.backlight(null)", 0},
+      {"sys.backlight(1e300)", 100},
       {"sys.backlight(62.7)", 62},
+      {"sys.backlight(0)", 0},
+      {"sys.backlight(100)", 100},
   };
   for (const auto &c : converts) {
     host_hooks_reset();
-    const std::string name = std::string("sys: ") + c.call + " still reaches the host";
-    if (!run_script(c.call)) {
+    // 37 is not any row's expectation, and not the resting value either.
+    const std::string src = std::string("sys.backlight(37); ") + c.call + ";";
+    const std::string name = std::string("sys: ") + c.call + " reaches the host";
+    if (!run_script(src.c_str())) {
       bad(name.c_str(), "evaluation threw");
     } else {
-      check_eq(name.c_str(), host_backlight_call_count(), 1);
+      check_eq((name + ", after the seed").c_str(), host_backlight_call_count(), 2);
       check_eq((name + " as " + std::to_string(c.want)).c_str(), (int)host_backlight(),
                c.want);
     }

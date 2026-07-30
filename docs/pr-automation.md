@@ -12,7 +12,9 @@ The design principle here is that **the gate is the ruleset on `main`, not a wor
 4. When you're ready, click **Ready for review** (or `gh pr ready`). That fires `ready_for_review`, and the review job runs for real. It first waits for every other check on the commit and refuses to review unless they all passed, so a broken build costs a red `review` rather than a paid review of code that is about to change. On `ready_for_review` that wait usually returns immediately, because `ci.yml` does not re-run on that event and its results from the draft pushes are already on the commit. Then Claude posts inline comments plus one sticky summary comment ending in `REVIEW: PASS` or `REVIEW: FAIL`.
 5. A follow-up step reads that verdict and exits non-zero on `FAIL`, so the `review` check goes red. Because the sticky comment is edited in place rather than reposted, the check status is the reliable signal, not whether the comment looks new.
 6. If the review passed, the second job arms GitHub's native auto-merge. It performs no checks of its own: it sets a flag and exits.
-7. GitHub merges when *its* conditions hold: every required check green on the head SHA, not a draft, and the branch up to date with `main`. Then it squashes and deletes the branch.
+7. GitHub merges when *its* conditions hold: every required check green on the head SHA, every review conversation resolved, not a draft, and the branch up to date with `main`. Then it squashes and deletes the branch.
+
+Conversation resolution is the condition that surprises people, because nothing in the check list shows it. A review that votes `REVIEW: PASS` and leaves non-blocking inline remarks turns `review` green and still holds the merge: the PR reports `BLOCKED` with `mergeable: MERGEABLE` and four green checks. Reply to each thread saying what you did about it and resolve it, and the merge proceeds. Outdated threads, whose lines are no longer in the diff, count the same as current ones.
 
 If anything fails, nothing happens and the PR stays open. Push more commits, the review re-runs on `synchronize`, and GitHub re-evaluates. If you decide mid-review that a PR needs more work, convert it back to a draft.
 
@@ -31,7 +33,8 @@ Half of this automation is not in the repo. It lives in GitHub settings, where i
 | Rule | Required setting | What breaks without it |
 |---|---|---|
 | Require a pull request | enabled, 0 approving reviews | Commits reach `main` without ever entering the gate. Approvals stay at 0 deliberately: the review is enforced as a status check, not as a GitHub review, which also sidesteps the rule that a PAT cannot approve its own account's PR |
-| Require status checks | `scripts`, `firmware`, `review` | Dropping `review` reduces the gate to CI alone: a `REVIEW: FAIL` still turns the check red, but the PR merges anyway |
+| Require status checks | `scripts`, `firmware`, `host-test`, `review` | Dropping `review` reduces the gate to CI alone: a `REVIEW: FAIL` still turns the check red, but the PR merges anyway |
+| Require conversation resolution | enabled | An unanswered review remark stops blocking, so a PR merges with the review's inline findings neither addressed nor acknowledged. With it on, a green `review` is not sufficient on its own, which is the point: a PASS with non-blocking remarks still needs a reply per thread |
 | Require branches up to date | enabled | Nothing breaks; this is what makes a PR stall when `main` moves under it, rather than merging stale |
 | Block force pushes, block deletion | enabled | History on `main` becomes rewritable |
 

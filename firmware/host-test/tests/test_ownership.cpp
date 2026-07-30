@@ -259,7 +259,9 @@ void a_handler_may_clean_its_own_screen() {
 // wrapper is freed and the throw coincides: in *this* case the wrapper is never
 // freed. JS_Call always passes JS_CALL_FLAG_COPY_ARGV (quickjs.c:20378), so the
 // condition at :17632 holds whatever argc is, and a bytecode callee copies its
-// arguments into its own frame at :17655, one js_dup per declared parameter. The
+// arguments into its own frame at :17655, one js_dup per argument actually passed,
+// capped at the declared count (n = min_int(argc, b->arg_count) at :17652; any
+// remaining declared slots get JS_UNDEFINED rather than a dup, at :17656-17657). The
 // handler here declares `self`, so it gets a reference of its own for the frame's
 // lifetime, and the binding dropping its reference mid-handler takes the refcount
 // to 1 rather than to 0. Measured rather than argued: with the dup gone, a handler
@@ -270,7 +272,7 @@ void a_handler_may_clean_its_own_screen() {
 // protection. The copy is sized by the callee's declared parameter count
 // (arg_allocated_size = b->arg_count at :17633, gated at :17651), so a handler
 // declaring no parameters gets no copy and arg_buf stays the borrowed argv from
-// :17645 — which is the shape of a_handler_may_clean_its_own_screen two cases up,
+// :17645 — which is the shape of a_handler_may_clean_its_own_screen just above,
 // where what keeps the wrapper alive is that script's own `const b`. And the copy
 // is bytecode-only: :17620-17628 hands argv straight to call_func for a native or
 // bound-to-native callable, which .on() accepts. Neither shape reads the widget

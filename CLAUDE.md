@@ -50,7 +50,22 @@ node tools/test-ui.mjs                   # the component runtime, against a fake
 node tools/build-app.mjs --check         # fail if a committed app/apps/*.js is stale
 ```
 
-What CI *cannot* do: run `app/selftest.js`, the real functional test of the binding layer — it executes on the board and reports over serial, so it needs hardware (deploy it in place of `app.js` and read the serial log, or wire up a self-hosted runner). `app/ui-selftest.js` is the same shape for the component runtime. Changes to the binding layer or hardware glue need a real board; the JSX layer is mostly coverable without one, because it is pure JavaScript over `lv` calls that `tools/lv-mock.mjs` can fake.
+Plus the host build, which is the one place the C layer is *executed* off-hardware (`docs/host-test.md`). It compiles `jsvm_core.cpp`, `bindings_lv.cpp`, `bindings_sys.cpp` and `bindings_fs.cpp` against Arduino stubs and runs them under AddressSanitizer, with both historical use-after-frees as regression cases:
+
+```
+cmake -S firmware/host-test -B firmware/host-test/.build -G Ninja
+cmake --build firmware/host-test/.build -j
+ctest --test-dir firmware/host-test/.build --output-on-failure
+```
+
+That needs a C++17 compiler, CMake and Ninja, which the Windows box this is developed on does not have. Run it in a container instead, which is also what CI does:
+
+```powershell
+podman run --rm -v "${PWD}:/w" -w /w ubuntu:24.04 bash -lc `
+  "apt-get update -qq && apt-get install -y -qq build-essential cmake ninja-build git && cmake -S firmware/host-test -B /tmp/b -G Ninja && cmake --build /tmp/b -j && ctest --test-dir /tmp/b --output-on-failure"
+```
+
+What CI *still cannot* do: run `app/selftest.js`, the functional test of the binding layer on real hardware — it executes on the board and reports over serial, so it needs a board (deploy it in place of `app.js` and read the serial log, or wire up a self-hosted runner). `app/ui-selftest.js` is the same shape for the component runtime. The host build is a regression net under `selftest.js`, not a replacement: it has no panel, no touch, no real PSRAM or DMA, and no input device, so a firmware change still wants a board before you believe it. The JSX layer is mostly coverable without one, because it is pure JavaScript over `lv` calls that `tools/lv-mock.mjs` can fake.
 
 One trap the PC-side checks cannot catch on their own: **Node accepts control characters (a raw NUL) inside a string literal and QuickJS does not**, so such a file passes `node --check`, pushes with a matching checksum, and then fails to evaluate on the panel with a syntax error on a line that looks fine. `tools/build-app.mjs` rejects them; nothing else does.
 

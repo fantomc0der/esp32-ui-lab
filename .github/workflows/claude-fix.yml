@@ -11,6 +11,15 @@ on:
   pull_request_review_comment:
     types: [created]
 
+# Two `@claude` comments in quick succession would otherwise start two runs that
+# check out the same branch and both try to push to it, where the loser fails on a
+# non-fast-forward after having already paid for its turns. Queued rather than
+# cancelled: unlike a review, a fix run has side effects, and cancelling one
+# partway through can leave a commit pushed with the work half done.
+concurrency:
+  group: claude-fix-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   fix:
     # Only PR comments containing @claude, and never a comment written by a bot.

@@ -9,7 +9,7 @@ The design principle here is that **the gate is the ruleset on `main`, not a wor
 1. Create a branch, commit, push. Open a pull request against `main`. Open it as a **draft** if it isn't finished: `gh pr create --draft`.
 2. `ci.yml` runs on every push, draft or not, and reports `scripts` and `firmware`.
 3. While the PR is a draft, `review` deliberately fails, which also skips the job that arms auto-merge, so a draft can never arm a merge. A red check on a draft is expected; see below for why it is failed rather than skipped.
-4. When you're ready, click **Ready for review** (or `gh pr ready`). That fires `ready_for_review`, the review job runs for real, and Claude posts inline comments plus one sticky summary comment ending in `REVIEW: PASS` or `REVIEW: FAIL`.
+4. When you're ready, click **Ready for review** (or `gh pr ready`). That fires `ready_for_review`, and the review job runs for real. It first waits for every other check on the commit and refuses to review unless they all passed, so a broken build costs a red `review` rather than a paid review of code that is about to change. On `ready_for_review` that wait usually returns immediately, because `ci.yml` does not re-run on that event and its results from the draft pushes are already on the commit. Then Claude posts inline comments plus one sticky summary comment ending in `REVIEW: PASS` or `REVIEW: FAIL`.
 5. A follow-up step reads that verdict and exits non-zero on `FAIL`, so the `review` check goes red. Because the sticky comment is edited in place rather than reposted, the check status is the reliable signal, not whether the comment looks new.
 6. If the review passed, the second job arms GitHub's native auto-merge. It performs no checks of its own: it sets a flag and exits.
 7. GitHub merges when *its* conditions hold: every required check green on the head SHA, not a draft, and the branch up to date with `main`. Then it squashes and deletes the branch.
@@ -19,8 +19,8 @@ If anything fails, nothing happens and the PR stays open. Push more commits, the
 ## Files
 
 - `.github/workflows/ci.yml` — the existing hardware-free checks: every board compiles, scripts parse, scripts only call bindings the C layer registers, generated apps are not stale, doc links resolve. Reports `scripts` and `firmware`.
-- `.github/workflows/claude-review.yml` — two jobs. `review` runs the Anthropic action and turns the verdict into the job's conclusion. `arm-auto-merge` needs `review` to have succeeded, then calls `gh pr merge --auto --squash`.
-- `.github/workflows/claude-fix.yml` — on-demand. Comment `@claude <what to change>` on a PR and Claude pushes the change to the branch.
+- `.github/workflows/claude-review.yml` — two jobs. `review` runs the Anthropic action and turns the verdict into the job's conclusion. `arm-auto-merge` needs `review` to have succeeded, then calls `gh pr merge --auto --squash`. Both sit in one concurrency group per PR with `cancel-in-progress`, so a second push supersedes the review still running for the first instead of paying for two that race to rewrite the same sticky comment.
+- `.github/workflows/claude-fix.yml` — on-demand. Comment `@claude <what to change>` on a PR and Claude pushes the change to the branch. Also one concurrency group per PR, but queued rather than cancelling, because a fix run pushes commits and cancelling one partway can leave the work half done.
 
 ## Repository state this depends on
 
@@ -67,7 +67,15 @@ REVIEW: PASS
 REVIEW: FAIL
 ```
 
-The workflow reads the *last* comment matching that pattern, so a re-review after a fix supersedes an earlier `FAIL`. A missing or unrecognized verdict is treated as a failure rather than a pass, on the principle that a review that did not produce an opinion has not reviewed anything.
+The workflow reads that verdict **only from comments authored by `claude[bot]`**, and only when it stands alone on a line. That filter is the gate's authentication, and it is worth understanding why it is not optional. This is a public repository, so any GitHub user can comment on an open pull request. An earlier version scraped the last verdict-shaped string from any author, which meant a comment reading `REVIEW: PASS` — written by anyone, or quoted in passing — took precedence over the bot's own `REVIEW: FAIL`, because the sticky comment is created once and edited in place and is therefore always the *older* comment. The check went green and auto-merge armed on a review that had voted to block. `claude-fix.yml` widened the same hole from the inside: it authenticates with the PAT, so its summaries are authored by the repository owner's account rather than by the app, and were indistinguishable from a human's to a filter that only looked at the text.
+
+The identity is checked against the REST API rather than `gh pr view --json comments`, because the two disagree about who the author is: REST reports `claude[bot]` with `type: Bot`, while `gh pr view` reports the same comment as plain `claude`. Only the REST form is checkable, since `[` cannot appear in a GitHub username and no account can be registered that satisfies both halves.
+
+Because there is only ever one sticky comment, "the last verdict" is not superseding anything: a re-review edits that comment rather than posting a new one. The reason to still take the last match is narrower — it is the final line of the body, which is where the prompt requires the real verdict to be, rather than an earlier mention of one.
+
+That same stickiness is why the verdict must also come from **this** workflow run. The comment outlives the commit it describes, so a `REVIEW: PASS` written for an earlier commit is still sitting there, in full, when a later run reads it, and any path that reaches the verdict step without the action having refreshed the comment would read that old verdict and green-light a commit nothing looked at. The check is made against the action's own output rather than the model's: the sticky comment's header carries `[View job](.../actions/runs/<id>)` for the run that last wrote it, and the verdict step requires that id to be its own. Unlike asking the review to echo its SHA back, that cannot be mistranscribed. It does couple the step to that header's format, which is one more reason the action is pinned — re-read the verdict step when moving the pin. A verdict from an older run is reported distinctly from no verdict at all, because on the PR the two look identical and only one of them means the commit was reviewed.
+
+A missing or unrecognized verdict is treated as a failure rather than a pass, on the principle that a review that did not produce an opinion has not reviewed anything. Note the one confusing shape this creates: if the review ever comments under a different identity, the verdict is plainly visible on the PR while the check reports none. Check the comment's author before the action log in that case.
 
 ## Why there is no auto-merge workflow
 
@@ -85,6 +93,8 @@ Guarding the whole job with `if: draft == false` reads better and is wrong. A sk
 
 So drafts fail the check. The red X means nothing has reviewed this, which is true.
 
+The same reasoning governs the CI wait described in the happy path, and it is why that is a failing *step* inside the review job rather than an `if:` or a `needs:` on the job. Gating the job would be the tidier spelling and would hand out a green `review`, by the same `skipped` mechanism, on every commit with a red build. Both refusals are steps for one reason: a job that does not run still answers the ruleset, and the answer it gives is yes.
+
 ## Two sharp edges
 
 **Auto-merge does not update the branch.** The ruleset sets `strict_required_status_checks_policy`, meaning a PR must be up to date with `main` before merging. GitHub's auto-merge honours that but will not update the branch for you, so if `main` moves while a PR waits, the PR sits armed and unmerged until you update it. With serial one-at-a-time PRs this never comes up. If it starts happening, the fix is to turn strictness off in the ruleset rather than to add a workflow that pushes merges into branches.
@@ -101,7 +111,11 @@ That is a security control, and the right one. Without it a pull request could r
 
 The practical effect: a PR touching this file gets no verdict comment, the verdict step fails closed, `review` goes red, and the required check blocks the merge. Drop `review` from the ruleset's required checks, merge, then add it back. Keep such PRs small and separate from functional changes, because the diff genuinely goes unreviewed.
 
-Failing closed is worth preserving here. Treating a missing verdict as a pass would let a PR that edits the review workflow merge unreviewed, which is precisely the attack the validation exists to prevent.
+**How the refusal actually surfaces is worth knowing, because it is not what it sounds like.** The action does not fail. It emits a warning, logs `Exiting due to workflow validation skip`, and the step **succeeds** (observed in run `30510145596`). So the implicit `success()` guard does not protect anything here: every later step runs, and the verdict step is the only thing standing between a workflow-touching PR and a green check.
+
+That is what makes binding the verdict to its run load-bearing rather than defensive. The sticky comment survives the whole PR, so on a PR that had already been reviewed once, an earlier round's `REVIEW: PASS` was still sitting there when the workflow-touching commit was pushed. The action would skip, write nothing, and a scrape that only asked "is there a PASS on this PR" would find that one and go green, arming auto-merge on an unreviewed edit to the review workflow itself. Precisely the attack the validation exists to prevent, reached through the gate rather than around it. Requiring the verdict to carry the current run's id closes it: the skipped run writes no comment, so there is no verdict belonging to it, so the check stays red.
+
+Failing closed is worth preserving here. Treating a missing verdict as a pass would let a PR that edits the review workflow merge unreviewed. So would treating a *stale* verdict as a current one, which is the same hole wearing a disguise.
 
 ## Overriding the automation
 
@@ -119,6 +133,6 @@ Secondary risks, in rough order of how likely they are to bite:
 
 - **A false PASS.** LLM review misses subtle logic bugs and anything requiring runtime verification. If it starts rubber-stamping, you will not notice until something breaks on the panel. Read the comments even when they say PASS, and calibrate over time.
 - **One reviewer, one blind spot.** A human reviewer gives you a second mental model. Here you get one model's read plus whatever the hardware-free checks happen to cover.
-- **Cost scales with pushes.** Every push to a ready PR triggers a full review. Ten fixups mean ten reviews. Each is well under a dollar, but pushing fixups to a draft and marking it ready once is both cheaper and quieter.
+- **Cost scales with pushes, and it concentrates.** Every push to a ready PR triggers a full review of the whole diff, not of what changed since the last one. Measured over this repo's history to date, one pull request (#20, eighteen commits marked ready early) accounts for sixteen of the roughly eighteen billed reviews; every other PR cost one or two. The largest lever is therefore not the trigger but the readiness: pushes to a draft cost nothing, because the draft refusal fails in under thirty seconds without reaching the model. Push fixups to a draft and mark it ready once.
 - **PAT blast radius.** If the PAT leaks, an attacker can push to branches and merge. Mitigated by the fine-grained scope and an expiry date. Rotate rather than extend.
 - **Dependency on API availability.** If the Anthropic API is down, `review` cannot go green and nothing merges automatically until it recovers.

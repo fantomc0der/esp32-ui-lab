@@ -16,6 +16,21 @@ on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
 
+# One review at a time per PR, and the newest push wins. Without this, two pushes
+# a minute apart buy two full reviews that race to rewrite the same sticky comment,
+# and the verdict the gate reads is whichever finished last rather than whichever
+# looked at the current code. Keyed on the PR number so unrelated PRs still run in
+# parallel.
+#
+# Cancelling is safe in both jobs. A cancelled `review` leaves its check red on a
+# SHA that is no longer the head, which GitHub ignores, and the run that replaced
+# it reports on the SHA that matters. A cancelled `arm-auto-merge` arms nothing,
+# which is the correct outcome when the commit it was arming for has been
+# superseded; the replacement run arms again, and that step is idempotent anyway.
+concurrency:
+  group: claude-review-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     # Named to sit alongside `scripts` and `firmware` in the ruleset's required checks.
@@ -25,6 +40,12 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
+      # For reading the other jobs' check runs in "Require CI to be green" below.
+      # `permissions:` is declared explicitly here, so anything unlisted is denied.
+      checks: read
+    # A bound on the CI wait below, so a check that never reports ends as a red
+    # `review` after an hour instead of occupying a runner until the 6h default.
+    timeout-minutes: 60
     steps:
       # A draft has not been reviewed, so this check must not be green. Guarding the
       # whole job with `if: draft == false` looks tidier but publishes a `skipped`
@@ -41,6 +62,81 @@ jobs:
         run: |
           echo "::error::Draft PR, so nothing has reviewed this. Mark it ready for review."
           exit 1
+
+      # Don't buy a review of code that does not compile. A red CI means the diff
+      # is going to change, so any review of it is discarded work, and reviewing it
+      # is also actively misleading: the model reasons about a tree the runner has
+      # already proved broken.
+      #
+      # This has to be a failing *step* rather than `if:` or `needs:` on the job.
+      # A skipped job publishes a `skipped` conclusion and GitHub counts that as
+      # satisfying a required status check, so gating the job would hand out a green
+      # `review` on a commit nothing reviewed. That is the same trap the draft step
+      # above exists to avoid, and it is worse here because it would fire on every
+      # red build. Ordering matters too: the draft check runs first, so a draft
+      # still fails in seconds rather than waiting on CI it does not need.
+      #
+      # Waits by commit rather than by workflow run, which is what makes it correct
+      # on `ready_for_review`: `ci.yml` does not re-run on that event (it is not in
+      # the default `pull_request` types), but its check runs from the draft pushes
+      # are already on this SHA and already complete, so this returns at once.
+      #
+      # This workflow's own two jobs are excluded by name. `arm auto-merge` is
+      # queued behind this job for the whole time it runs, so waiting on it would
+      # deadlock until the timeout. Everything else on the commit is waited for
+      # without naming it, so a new CI job is covered the day it is added.
+      #
+      # That includes `fix` from claude-fix.yml, deliberately. A fix run in flight
+      # is about to push a commit, and waiting for it means the push supersedes this
+      # run through the concurrency group above rather than this run reviewing a
+      # tree that is one commit from changing. Waiting costs one review fewer.
+      #
+      # This is a cost and sequencing optimization, not a gate. The ruleset on main
+      # is still what decides whether `scripts`, `firmware` and `host-test` have to
+      # be green to merge; nothing here can let a red build through, and if this
+      # step and the ruleset ever disagree the ruleset wins.
+      - name: Require CI to be green before spending a review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          own='select(.name != "review" and .name != "arm auto-merge")'
+          deadline=$(( $(date +%s) + 2700 ))
+          while :; do
+            checks=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs" \
+              --jq ".check_runs[] | $own | \"\(.status) \(.conclusion // \"pending\") \(.name)\"")
+
+            # A conclusion outside this set is a real failure: failure, timed_out,
+            # cancelled, action_required, stale. `skipped` and `neutral` are counted
+            # as fine because a job that opted out has not found anything wrong.
+            bad=$(printf '%s\n' "$checks" | grep -v '^\s*$' \
+              | awk '$1 == "completed" && $2 != "success" && $2 != "skipped" && $2 != "neutral"' || true)
+            if [ -n "$bad" ]; then
+              echo "$bad"
+              echo "::error::The checks above are not green on $SHA, so this review is not worth paying for. Fix them and push; the review runs again on the new commit."
+              exit 1
+            fi
+
+            waiting=$(printf '%s\n' "$checks" | grep -v '^\s*$' | awk '$1 != "completed"' || true)
+            done_count=$(printf '%s\n' "$checks" | grep -c . || true)
+            if [ -z "$waiting" ] && [ "$done_count" -gt 0 ]; then
+              echo "CI is green on $SHA ($done_count checks). Reviewing."
+              exit 0
+            fi
+
+            # No checks at all yet means CI has not registered its jobs for this
+            # commit; that is indistinguishable from "about to", so it waits.
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "${checks:-(no checks reported)}"
+              echo "::error::Timed out waiting for CI on $SHA. Nothing has reviewed this commit."
+              exit 1
+            fi
+            echo "waiting for CI on $SHA:"
+            printf '%s\n' "${checks:-  (no checks reported yet)}"
+            sleep 20
+          done
 
       - uses: actions/checkout@v4
         with:
@@ -108,22 +204,73 @@ jobs:
       # invisible to the merge gate — the check would go green simply because the
       # action did not error. This step is what turns the verdict into the job's
       # conclusion, and therefore into the required check that blocks the merge.
+      #
+      # Read only what `claude[bot]` wrote. This is the whole gate, so who authored
+      # the text it trusts is load-bearing: on a public repo any GitHub user can
+      # comment on an open PR, and scraping the last verdict-shaped string from any
+      # author let a comment saying `REVIEW: PASS` override a bot that had voted
+      # FAIL. `claude-fix.yml` posts as the PAT's own account rather than as the
+      # app, so its summaries were indistinguishable from a human's here too.
+      #
+      # The REST endpoint is deliberate. `gh pr view --json comments` reports this
+      # author as `claude` with no indication it is an app, while REST reports
+      # `claude[bot]` with `type: Bot`. Only the latter is checkable: `[` is not a
+      # legal character in a GitHub username, so no account can be created that
+      # satisfies both halves of this filter.
+      #
+      # Anchoring the pattern to a whole line matches what the prompt above demands
+      # (the verdict alone on the final line) and stops a verdict quoted mid-sentence
+      # from being read as the verdict. `--paginate` streams bodies in order and the
+      # aggregation is left to `tail`, because a `last` inside --jq would be applied
+      # per page rather than across all of them.
+      # The verdict must also come from *this* run, not merely from the bot. The
+      # sticky comment outlives the commit it describes: it is created once and
+      # edited in place for the life of the PR, so a `REVIEW: PASS` written for an
+      # earlier commit is still sitting there, in full, when a later run reads it.
+      # Any path that reaches this step without the action having refreshed that
+      # comment would read the old verdict and green-light a commit nothing looked
+      # at. Binding to the run closes that by construction, because a run reviews
+      # the head it was triggered for.
+      #
+      # The binding uses the action's own output rather than the model's: the
+      # sticky comment's header carries `[View job](.../actions/runs/<id>)` for the
+      # run that last wrote it. That is emitted by the action, so unlike asking the
+      # review to echo its SHA back it cannot be mistranscribed. It does couple this
+      # step to that header's format, which is why the action is pinned; re-read
+      # this step when moving the pin. The failure is closed and loud if the format
+      # ever moves.
       - name: Reflect verdict as job status
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          verdict=$(gh pr view "$PR" --repo "$REPO" --json comments \
-            --jq '[.comments[] | select(.body | test("REVIEW: (PASS|FAIL)"))] | last | .body' \
-            | grep -oE 'REVIEW: (PASS|FAIL)' | head -1 || echo "")
-          echo "Claude verdict: ${verdict:-(none)}"
+          # `gh api` has no --arg, so the filter is built by interpolation. RUN_ID is
+          # a GitHub-provided integer rather than anything a PR can influence.
+          bot='.[] | select(.user.type == "Bot" and .user.login == "claude[bot]")'
+          verdict=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq "$bot | select(.body | contains(\"/actions/runs/$RUN_ID\")) | .body" \
+            | tr -d '\r' | grep -oE '^REVIEW: (PASS|FAIL)$' | tail -1 || echo "")
+          echo "Claude verdict: ${verdict:-(none)} (run $RUN_ID)"
           if [ "$verdict" = "REVIEW: PASS" ]; then
             exit 0
           fi
           if [ "$verdict" = "REVIEW: FAIL" ]; then
             echo "::error::Claude voted REVIEW: FAIL — see the review comment for details."
+            exit 1
+          fi
+
+          # Nothing from this run. Before reporting that, separate the case where a
+          # verdict does exist but belongs to an earlier run, because on the PR the
+          # two are indistinguishable — a summary comment ending in `REVIEW: PASS`
+          # sits there in both, and only one of them means this commit was reviewed.
+          stale=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq "$bot | .body" \
+            | tr -d '\r' | grep -oE '^REVIEW: (PASS|FAIL)$' | tail -1 || echo "")
+          if [ -n "$stale" ]; then
+            echo "::error::The verdict on this PR ($stale) was written by an earlier run, not by this one, so no review has looked at this commit. Re-run this job to review it."
             exit 1
           fi
           # No verdict is not a third outcome to interpret — it means the review did
@@ -135,7 +282,12 @@ jobs:
           # ends in seconds having spent nothing never reached the model at all
           # (exhausted token budget or an API-side failure); a run that ends after
           # many turns crashed mid-review.
-          echo "::error::No verdict from Claude, so this PR is unreviewed. Check the action log rather than the PR comment: if the run was short and free, the review never started."
+          #
+          # One more way to land here, which the log will not explain: the review
+          # commented under some identity other than `claude[bot]` and the filter
+          # above discarded it. If the verdict is plainly visible on the PR and this
+          # step still reports none, check the comment's author before anything else.
+          echo "::error::No verdict from claude[bot], so this PR is unreviewed. Check the action log rather than the PR comment: if the run was short and free, the review never started. If a verdict is visible on the PR, check who authored it."
           exit 1
 
   arm-auto-merge:

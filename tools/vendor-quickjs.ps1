@@ -40,6 +40,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Pinned rather than inherited. When this is on, a non-zero exit from a native command raises a
+# terminating error, which would bypass every $LASTEXITCODE check below — including the ones whose
+# whole job is to turn an *expected* git failure into a useful message or a $null return, such as
+# an unresolvable target or a commit that carries no exact tag. It is off by default, but it is a
+# preference variable and a profile can flip it, so the script states what it needs.
+$PSNativeCommandUseErrorActionPreference = $false
 
 $RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $VendorDir   = Join-Path $RepoRoot 'firmware/quickjs-ng'
@@ -47,6 +53,7 @@ $SrcDir      = Join-Path $VendorDir 'src'
 $PatchDir    = Join-Path $VendorDir 'patches'
 $ReadmePath  = Join-Path $VendorDir 'README.md'
 $PropsPath   = Join-Path $VendorDir 'library.properties'
+$LicensePath = Join-Path $VendorDir 'LICENSE'
 $Workspace   = Join-Path $RepoRoot '.temp/vendor-quickjs'
 $ClonePath   = Join-Path $Workspace 'quickjs'
 $UpstreamUrl = 'https://github.com/quickjs-ng/quickjs'
@@ -117,6 +124,9 @@ $BaselineVersion = $Matches['ver']
 Write-Host "Current pin: v$BaselineVersion ($BaselineSha)"
 
 $patches = @(Get-ChildItem -LiteralPath $PatchDir -Filter '*.patch' | Sort-Object Name)
+# Deliberate guard, not an invariant of the design: an empty patches/ almost always means they were
+# deleted by accident. If upstream ever takes the Xtensa fixes the local delta legitimately becomes
+# zero, and re-vendoring turns into a plain copy — delete this check when that day comes.
 if ($patches.Count -eq 0) { throw "No patches found in $PatchDir" }
 Write-Host "Local patches: $($patches.Count)"
 
@@ -182,6 +192,15 @@ try {
     }
     Write-Host "Recording version $Version at $targetSha"
 
+    # Check every manifest name resolves before anything on disk is touched. This is the failure
+    # the explicit manifest is designed to have, so it must land cleanly: discovered mid-copy it
+    # would leave src/ half old and half new, with patches/ already swapped underneath it.
+    $missing = @(($Manifest + 'LICENSE') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ClonePath $_)) })
+    if ($missing.Count -gt 0) {
+        throw ("Upstream at $Target does not carry: $($missing -join ', '). It has reorganised the " +
+               "tree, so update `$Manifest in this script. Nothing has been modified.")
+    }
+
     Write-Host "Regenerating patches against the new baseline ..."
     # Generate into a scratch directory and swap only once the count checks out, so a surprise
     # here leaves patches/ exactly as it was instead of half-rewritten.
@@ -205,12 +224,11 @@ try {
 
     Write-Host "Copying $($Manifest.Count) files into src/ ..."
     foreach ($name in $Manifest) {
-        $from = Join-Path $ClonePath $name
-        if (-not (Test-Path -LiteralPath $from)) {
-            throw "Manifest file '$name' is missing from upstream at $Target. Upstream reorganised the tree; update `$Manifest in this script."
-        }
-        [System.IO.File]::Copy($from, (Join-Path $SrcDir $name), $true)
+        [System.IO.File]::Copy((Join-Path $ClonePath $name), (Join-Path $SrcDir $name), $true)
     }
+    # Upstream's licence text travels with the sources it covers. README.md cites it as the licence
+    # of record, so refreshing the tree without it would leave that citation quietly ageing.
+    [System.IO.File]::Copy((Join-Path $ClonePath 'LICENSE'), $LicensePath, $true)
     # Anything left in src/ that the manifest does not name is a leftover from an older layout.
     $stale = @(Get-ChildItem -LiteralPath $SrcDir -File | Where-Object { $Manifest -notcontains $_.Name })
     if ($stale.Count -gt 0) {

@@ -7,7 +7,7 @@ The counterpart to [`experiments/c-dashboard/portability.md`](experiments/c-dash
 | Component | Lines | Board-specific? |
 |---|---|---|
 | `lvgl-js-bindings/src/` | 2621 | **0%** — knows LVGL, QuickJS and the Arduino ESP32 core. No pins, no panel, no resolution. The `sys` and `wifi` modules compile out via `-DJSVM_WITH_SYS=0` / `-DJSVM_WITH_WIFI=0`, and the supervisor (`jsvm_app.cpp`, 442 lines) is optional. |
-| `quickjs-ng/src/` | vendored | **0%** — plain C, five Xtensa type patches (see [engine-notes.md](engine-notes.md)). |
+| `quickjs-ng/src/` | vendored | **0%** — plain C, upstream but for five Xtensa type fixes carried as [one patch](../firmware/quickjs-ng/patches/0001-xtensa-int32-pointer-types.patch) and replayed by `tools/vendor-quickjs.ps1` (see [engine-notes.md](engine-notes.md)). |
 | `boards/<name>/<name>.ino` | 189 | **~95%** — display construction, pin use, SD_MMC wiring, the three host hooks, and a config struct. Almost nothing here is reusable, which is the point: everything that was got moved. |
 | `boards/<name>/` hardware headers | — | **100%** — this is the board, by definition; the frozen C dashboard's [portability doc](experiments/c-dashboard/portability.md) breaks the same files down line by line. |
 | `app/app.js` and `app/apps/` | 571 | **~85%** — geometry is derived from `lv.size()`, percentages and alignment rather than written for 320×172, so the apps fill a different panel instead of sitting in a corner of it. The residual 15% is the pixel constants that are tuned to font metrics (a header's height, the gap between two lines), and they are load-bearing: a panel small enough to crowd them still needs a look. |

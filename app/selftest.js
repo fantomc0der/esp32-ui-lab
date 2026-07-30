@@ -352,10 +352,19 @@ check("sys.battery is a number or null", () => {
   return b === null || typeof b === "number";
 });
 check("sys.backlight accepts a percent", () => { sys.backlight(80); return true; });
-// The panel staying lit through this check is half the assertion: a no-argument
-// call used to be read as "set it to 0" and dim it to the PWM floor.
-check("sys.backlight with no argument throws", () => {
+// The panel is at 80 from the check above, and staying there is half of what
+// these assert: each of these calls used to be read as "set it to 0" and dim it
+// to the PWM floor, where it looks like a crashed board. Watching the panel not
+// change is the eye-checkable half. TypeError is pinned rather than using
+// threw(), because the error type is the part a script would branch on.
+check("sys.backlight rejects a missing argument", () => {
   try { sys.backlight(); return false; } catch (e) { return e instanceof TypeError; }
+});
+check("sys.backlight rejects undefined", () => {
+  try { sys.backlight(undefined); return false; } catch (e) { return e instanceof TypeError; }
+});
+check("sys.backlight rejects a non-number", () => {
+  try { sys.backlight("bright"); return false; } catch (e) { return e instanceof TypeError; }
 });
 check("console.log accepts many args", () => { console.log("  (console ok)", 1, true); return true; });
 

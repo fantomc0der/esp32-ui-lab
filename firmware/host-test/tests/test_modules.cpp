@@ -111,23 +111,55 @@ void sys_backlight_without_an_argument_throws() {
            host_backlight_call_count(), 0);
   check_eq("sys: the level is untouched after a throw", (int)host_backlight(), 100);
 
-  // The same failure one level down: a value that cannot convert to a number
-  // left pct at 0 and dimmed the panel, dropping the pending exception on the
-  // way. The conversion's own failure has to propagate too.
-  host_hooks_reset();
-  expect_output("sys: an unconvertible percent throws instead of dimming",
-                R"JS(
-                  let threw = false;
-                  try { sys.backlight({ valueOf() { throw new Error("nope"); } }); }
-                  catch (e) { threw = true; }
-                  console.log('blconv=' + threw);
-                )JS",
-                "blconv=true");
+  // The same failure with an argument present, which is the likelier route to
+  // it: sys.backlight(cfg.brightness) with the key missing. JS_ToInt32 turned
+  // each of these into 0 and dimmed the panel, and the throwing valueOf also
+  // dropped a pending exception on the way out. 0 cannot be the sentinel for a
+  // failed conversion here, because 0 is a level a script may legitimately ask
+  // for, so each has to be refused before the clamp.
+  const char *not_numbers[] = {
+      "sys.backlight(undefined)",
+      "sys.backlight(NaN)",
+      R"(sys.backlight("bright"))",
+      R"(sys.backlight({ valueOf() { throw new Error("nope"); } }))",
+  };
+  for (const char *call : not_numbers) {
+    host_hooks_reset();
+    const std::string src = std::string("let threw = false;\ntry { ") + call +
+                            "; } catch (e) { threw = true; }\n"
+                            "console.log('blconv=' + threw);";
+    const std::string name = std::string("sys: ") + call + " throws instead of dimming";
+    expect_output(name.c_str(), src.c_str(), "blconv=true");
+    check_eq((name + ", and never reached the host").c_str(),
+             host_backlight_call_count(), 0);
+    check_eq((name + ", leaving the level alone").c_str(), (int)host_backlight(), 100);
+  }
 
-  check_eq("sys: an unconvertible percent never reached the host",
-           host_backlight_call_count(), 0);
-  check_eq("sys: the level is untouched after a failed conversion",
-           (int)host_backlight(), 100);
+  // The other edge of insisting on a number: what JavaScript does convert still
+  // converts, so widening the rejection has not swallowed a legal call. Infinity
+  // is here because clamping happens as a double, an out-of-range one being
+  // undefined behaviour to cast. Checked one call per VM, like the clamp cases
+  // above, so none can pass on a value a later call left behind.
+  struct { const char *call; int want; } converts[] = {
+      {R"(sys.backlight("80"))", 80},
+      {"sys.backlight(Infinity)", 100},
+      {"sys.backlight(-Infinity)", 0},
+      {"sys.backlight(null)", 0},
+      {"sys.backlight(62.7)", 62},
+  };
+  for (const auto &c : converts) {
+    host_hooks_reset();
+    const std::string name = std::string("sys: ") + c.call + " still reaches the host";
+    if (!run_script(c.call)) {
+      bad(name.c_str(), "evaluation threw");
+    } else {
+      check_eq(name.c_str(), host_backlight_call_count(), 1);
+      check_eq((name + " as " + std::to_string(c.want)).c_str(), (int)host_backlight(),
+               c.want);
+    }
+    jsvm_stop();
+    host_settle();
+  }
 }
 
 void sys_info_and_heap_have_the_documented_shape() {

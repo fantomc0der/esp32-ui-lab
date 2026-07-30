@@ -43,11 +43,21 @@ static JSValue js_sys_fps(JSContext *ctx, JSValueConst, int, JSValueConst *) {
 // write-only and the board keeps no readable level. Every other sys reading is
 // a no-argument getter, so `sys.backlight()` reads like one too; answering that
 // as a set-to-zero dims the panel to its PWM floor, which looks like a crashed
-// board rather than a mistake in the script.
+// board rather than a mistake in the script. Anything that is not a number is
+// refused for the same reason: 0 is a legal level, so it cannot double as the
+// value a failed conversion leaves behind.
 static JSValue js_sys_backlight(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
-  if (argc < 1) return JS_ThrowTypeError(ctx, "backlight(pct) needs a percent");
-  int32_t pct = 0;
-  if (JS_ToInt32(ctx, &pct, argv[0])) return JS_EXCEPTION;
+  if (argc < 1 || JS_IsUndefined(argv[0]))
+    return JS_ThrowTypeError(ctx, "backlight(pct) needs a percent");
+  // Read as a double rather than with JS_ToInt32, which converts NaN and a
+  // non-numeric string to 0 without setting an exception. Those reach the panel
+  // as the same dark screen, by a likelier route than the zero-argument call:
+  // sys.backlight(cfg.brightness) with the key missing.
+  double pct = 0;
+  if (JS_ToFloat64(ctx, &pct, argv[0])) return JS_EXCEPTION;
+  if (isnan(pct)) return JS_ThrowTypeError(ctx, "backlight(pct) needs a number");
+  // Clamped as a double on purpose: casting an out-of-range one to an integer
+  // type is undefined behaviour, so 1e300 has to lose its range before the cast.
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
   jsvm_host_backlight(static_cast<uint8_t>(pct));

@@ -153,11 +153,19 @@ Read the full summary comment, plus any inline diff comments:
 gh api repos/{owner}/{repo}/pulls/<PR>/comments --jq '[.[] | {path: .path, line: .original_line, body: .body}]'
 ```
 
-Address **every blocking issue**. For observations Claude explicitly flags as non-blocking ("minor", "worth noting", "not blocking on its own"), use judgment: fix them when they are quick and clearly correct; leave them when they need a non-trivial design decision, and say so in the commit message.
+Address **every blocking issue**.
+
+Non-blocking observations are a different decision, and the default is not to take them. Each one you accept widens the diff, and a wider diff buys another review round over new code, which produces its own remarks: that is the ratchet that turns a small PR into five rounds. Take a non-blocking remark when it is a defect in what you already changed, or when leaving it would make the change itself wrong or misleading. Leave it when it is polish, a preference, or an improvement to code this PR was not otherwise touching, and say so in a reply. "Out of scope, worth doing separately" is a complete answer, and a follow-up issue is a better home for it than this branch.
+
+The exception worth naming, because it is the one case where widening is right: a remark that shows your fix addressed one instance of a defect whose class is wider. Fixing only the instance ships a bug you now know about. Generalize, and say in the PR description that you did and why.
 
 The review is prompted to vote FAIL when torn on a `firmware/` change, precisely because CI cannot verify those. A FAIL on firmware is therefore sometimes a request for justification rather than a defect report. If you believe the review is wrong, say why in a PR comment rather than silently pushing an unrelated change: the next review sees the conversation.
 
 After making fixes: commit, push, and let CI (Step 4) and the review (Step 6) re-run on `synchronize`. Repeat until `review` is green. If the same issue survives two fix attempts and you are not making progress, stop and surface it to the user rather than looping.
+
+**Batch the fixes into one commit and one push.** Every push cancels the review in flight and buys a fresh one, so three pushes in quick succession pay for three reviews of overlapping code and produce three rounds of remarks. Collect everything a round asked for, verify it together, commit once with each item called out in the message, and push once.
+
+**Know when to stop.** Once `review` is green and what remains is non-blocking, the PR is done. Reply on those threads, resolve them, and let it merge. Pushing another commit for polish restarts the whole gate: new CI, a new review over the code you just touched, and a new crop of remarks about it. Two rounds of substantive fixes is normal; a third round arriving with only smaller items than the second is the signal to stop improving and start shipping. If you believe a remaining remark genuinely matters, that is a reason to tell the user, not a reason to push again.
 
 ### Step 7 — Answer every review thread, then resolve it
 

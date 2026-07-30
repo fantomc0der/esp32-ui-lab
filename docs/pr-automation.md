@@ -19,8 +19,8 @@ If anything fails, nothing happens and the PR stays open. Push more commits, the
 ## Files
 
 - `.github/workflows/ci.yml` — the existing hardware-free checks: every board compiles, scripts parse, scripts only call bindings the C layer registers, generated apps are not stale, doc links resolve. Reports `scripts` and `firmware`.
-- `.github/workflows/claude-review.yml` — two jobs. `review` runs the Anthropic action and turns the verdict into the job's conclusion. `arm-auto-merge` needs `review` to have succeeded, then calls `gh pr merge --auto --squash`.
-- `.github/workflows/claude-fix.yml` — on-demand. Comment `@claude <what to change>` on a PR and Claude pushes the change to the branch.
+- `.github/workflows/claude-review.yml` — two jobs. `review` runs the Anthropic action and turns the verdict into the job's conclusion. `arm-auto-merge` needs `review` to have succeeded, then calls `gh pr merge --auto --squash`. Both sit in one concurrency group per PR with `cancel-in-progress`, so a second push supersedes the review still running for the first instead of paying for two that race to rewrite the same sticky comment.
+- `.github/workflows/claude-fix.yml` — on-demand. Comment `@claude <what to change>` on a PR and Claude pushes the change to the branch. Also one concurrency group per PR, but queued rather than cancelling, because a fix run pushes commits and cancelling one partway can leave the work half done.
 
 ## Repository state this depends on
 
@@ -67,7 +67,13 @@ REVIEW: PASS
 REVIEW: FAIL
 ```
 
-The workflow reads the *last* comment matching that pattern, so a re-review after a fix supersedes an earlier `FAIL`. A missing or unrecognized verdict is treated as a failure rather than a pass, on the principle that a review that did not produce an opinion has not reviewed anything.
+The workflow reads that verdict **only from comments authored by `claude[bot]`**, and only when it stands alone on a line. That filter is the gate's authentication, and it is worth understanding why it is not optional. This is a public repository, so any GitHub user can comment on an open pull request. An earlier version scraped the last verdict-shaped string from any author, which meant a comment reading `REVIEW: PASS` — written by anyone, or quoted in passing — took precedence over the bot's own `REVIEW: FAIL`, because the sticky comment is created once and edited in place and is therefore always the *older* comment. The check went green and auto-merge armed on a review that had voted to block. `claude-fix.yml` widened the same hole from the inside: it authenticates with the PAT, so its summaries are authored by the repository owner's account rather than by the app, and were indistinguishable from a human's to a filter that only looked at the text.
+
+The identity is checked against the REST API rather than `gh pr view --json comments`, because the two disagree about who the author is: REST reports `claude[bot]` with `type: Bot`, while `gh pr view` reports the same comment as plain `claude`. Only the REST form is checkable, since `[` cannot appear in a GitHub username and no account can be registered that satisfies both halves.
+
+Because there is only ever one sticky comment, "the last verdict" is not superseding anything: a re-review edits that comment rather than posting a new one. The reason to still take the last match is narrower — it is the final line of the body, which is where the prompt requires the real verdict to be, rather than an earlier mention of one.
+
+A missing or unrecognized verdict is treated as a failure rather than a pass, on the principle that a review that did not produce an opinion has not reviewed anything. Note the one confusing shape this creates: if the review ever comments under a different identity, the verdict is plainly visible on the PR while the check reports none. Check the comment's author before the action log in that case.
 
 ## Why there is no auto-merge workflow
 
@@ -119,6 +125,6 @@ Secondary risks, in rough order of how likely they are to bite:
 
 - **A false PASS.** LLM review misses subtle logic bugs and anything requiring runtime verification. If it starts rubber-stamping, you will not notice until something breaks on the panel. Read the comments even when they say PASS, and calibrate over time.
 - **One reviewer, one blind spot.** A human reviewer gives you a second mental model. Here you get one model's read plus whatever the hardware-free checks happen to cover.
-- **Cost scales with pushes.** Every push to a ready PR triggers a full review. Ten fixups mean ten reviews. Each is well under a dollar, but pushing fixups to a draft and marking it ready once is both cheaper and quieter.
+- **Cost scales with pushes, and it concentrates.** Every push to a ready PR triggers a full review of the whole diff, not of what changed since the last one. Measured over this repo's history to date, one pull request (#20, eighteen commits marked ready early) accounts for sixteen of the roughly eighteen billed reviews; every other PR cost one or two. The lever is therefore not the trigger but the readiness: pushes to a draft cost nothing, because the draft refusal fails in under thirty seconds without reaching the model. Push fixups to a draft and mark it ready once. Worth knowing before optimizing the trigger: no billed review in this repo has ever run against a red CI, so gating the review on the build would have saved nothing so far.
 - **PAT blast radius.** If the PAT leaks, an attacker can push to branches and merge. Mitigated by the fine-grained scope and an expiry date. Rotate rather than extend.
 - **Dependency on API availability.** If the Anthropic API is down, `review` cannot go green and nothing merges automatically until it recovers.

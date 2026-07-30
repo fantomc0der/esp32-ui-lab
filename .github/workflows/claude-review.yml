@@ -16,6 +16,21 @@ on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
 
+# One review at a time per PR, and the newest push wins. Without this, two pushes
+# a minute apart buy two full reviews that race to rewrite the same sticky comment,
+# and the verdict the gate reads is whichever finished last rather than whichever
+# looked at the current code. Keyed on the PR number so unrelated PRs still run in
+# parallel.
+#
+# Cancelling is safe in both jobs. A cancelled `review` leaves its check red on a
+# SHA that is no longer the head, which GitHub ignores, and the run that replaced
+# it reports on the SHA that matters. A cancelled `arm-auto-merge` arms nothing,
+# which is the correct outcome when the commit it was arming for has been
+# superseded; the replacement run arms again, and that step is idempotent anyway.
+concurrency:
+  group: claude-review-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     # Named to sit alongside `scripts` and `firmware` in the ruleset's required checks.
@@ -108,6 +123,25 @@ jobs:
       # invisible to the merge gate — the check would go green simply because the
       # action did not error. This step is what turns the verdict into the job's
       # conclusion, and therefore into the required check that blocks the merge.
+      #
+      # Read only what `claude[bot]` wrote. This is the whole gate, so who authored
+      # the text it trusts is load-bearing: on a public repo any GitHub user can
+      # comment on an open PR, and scraping the last verdict-shaped string from any
+      # author let a comment saying `REVIEW: PASS` override a bot that had voted
+      # FAIL. `claude-fix.yml` posts as the PAT's own account rather than as the
+      # app, so its summaries were indistinguishable from a human's here too.
+      #
+      # The REST endpoint is deliberate. `gh pr view --json comments` reports this
+      # author as `claude` with no indication it is an app, while REST reports
+      # `claude[bot]` with `type: Bot`. Only the latter is checkable: `[` is not a
+      # legal character in a GitHub username, so no account can be created that
+      # satisfies both halves of this filter.
+      #
+      # Anchoring the pattern to a whole line matches what the prompt above demands
+      # (the verdict alone on the final line) and stops a verdict quoted mid-sentence
+      # from being read as the verdict. `--paginate` streams bodies in order and the
+      # aggregation is left to `tail`, because a `last` inside --jq would be applied
+      # per page rather than across all of them.
       - name: Reflect verdict as job status
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -115,9 +149,9 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          verdict=$(gh pr view "$PR" --repo "$REPO" --json comments \
-            --jq '[.comments[] | select(.body | test("REVIEW: (PASS|FAIL)"))] | last | .body' \
-            | grep -oE 'REVIEW: (PASS|FAIL)' | head -1 || echo "")
+          verdict=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.user.type == "Bot" and .user.login == "claude[bot]") | .body' \
+            | tr -d '\r' | grep -oE '^REVIEW: (PASS|FAIL)$' | tail -1 || echo "")
           echo "Claude verdict: ${verdict:-(none)}"
           if [ "$verdict" = "REVIEW: PASS" ]; then
             exit 0
@@ -135,7 +169,12 @@ jobs:
           # ends in seconds having spent nothing never reached the model at all
           # (exhausted token budget or an API-side failure); a run that ends after
           # many turns crashed mid-review.
-          echo "::error::No verdict from Claude, so this PR is unreviewed. Check the action log rather than the PR comment: if the run was short and free, the review never started."
+          #
+          # One more way to land here, which the log will not explain: the review
+          # commented under some identity other than `claude[bot]` and the filter
+          # above discarded it. If the verdict is plainly visible on the PR and this
+          # step still reports none, check the comment's author before anything else.
+          echo "::error::No verdict from claude[bot], so this PR is unreviewed. Check the action log rather than the PR comment: if the run was short and free, the review never started. If a verdict is visible on the PR, check who authored it."
           exit 1
 
   arm-auto-merge:

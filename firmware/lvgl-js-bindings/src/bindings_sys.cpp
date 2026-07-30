@@ -39,9 +39,35 @@ static JSValue js_sys_fps(JSContext *ctx, JSValueConst, int, JSValueConst *) {
   return JS_NewUint32(ctx, jsvm_host_fps());
 }
 
+// Setter only, and it throws rather than reading, because the host hook is
+// write-only and the board keeps no readable level. Every other sys reading is
+// a no-argument getter, so `sys.backlight()` reads like one too; answering that
+// as a set-to-zero dims the panel to its PWM floor, which looks like a crashed
+// board rather than a mistake in the script.
+//
+// So the argument has to actually be a number, and every other type is refused
+// rather than converted. JS conversion sends too many things to 0, which is the
+// one value that must not be reachable by accident: null, false and "" all
+// become it, true becomes 1, and none of those is a level anyone meant to ask
+// for. 0 itself stays perfectly askable, it just has to be asked for as 0. A
+// string has to be converted by the caller, because "" and "  " are 0 too.
 static JSValue js_sys_backlight(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
-  int32_t pct = 0;
-  if (argc >= 1) JS_ToInt32(ctx, &pct, argv[0]);
+  if (argc < 1) return JS_ThrowTypeError(ctx, "backlight(pct) needs a percent");
+  // Checked as a type before any conversion. JS_ToFloat64 would report success
+  // for most of what this rejects: it fast-paths null and the booleans straight
+  // to 0 and 1 without calling ToNumber at all, so nothing downstream could tell
+  // them from a script that asked for those levels.
+  if (!JS_IsNumber(argv[0]))
+    return JS_ThrowTypeError(ctx, "backlight(pct) needs a number%s",
+                             JS_IsString(argv[0]) ? ", so convert the string first" : "");
+  // Cannot fail for a number, but a conversion result is checked rather than
+  // discarded, which is what let the original bug through.
+  double pct = 0;
+  if (JS_ToFloat64(ctx, &pct, argv[0])) return JS_EXCEPTION;
+  // NaN passes the type check and is still not a level.
+  if (isnan(pct)) return JS_ThrowTypeError(ctx, "backlight(pct) needs a number, not NaN");
+  // Clamped as a double on purpose: casting an out-of-range one to an integer
+  // type is undefined behaviour, so 1e300 has to lose its range before the cast.
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
   jsvm_host_backlight(static_cast<uint8_t>(pct));

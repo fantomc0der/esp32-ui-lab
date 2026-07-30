@@ -90,6 +90,115 @@ void sys_backlight_clamps_and_reaches_the_host() {
   host_settle();
 }
 
+// REGRESSION: a no-argument call used to be read as "set it to 0", which on the
+// real board dims the panel to its PWM floor and looks like a crash rather than
+// a mistake in the script. Both halves are asserted: the script sees a
+// TypeError, and the hook is never reached, so the panel cannot have moved.
+// host_hooks_reset() rests at 100 and the old bug wrote 0, so a pass here cannot
+// be the old behaviour landing on the expected value.
+void sys_backlight_without_an_argument_throws() {
+  host_hooks_reset();
+
+  expect_output("sys: backlight() with no argument throws",
+                R"JS(
+                  let threw = false;
+                  try { sys.backlight(); } catch (e) { threw = e instanceof TypeError; }
+                  console.log('blthrew=' + threw);
+                )JS",
+                "blthrew=true");
+
+  check_eq("sys: a throwing backlight() never reached the host",
+           host_backlight_call_count(), 0);
+  check_eq("sys: the level is untouched after a throw", (int)host_backlight(), 100);
+
+  // The same failure with an argument present, which is where the likelier
+  // routes are. Every one of these used to reach the host as 0 or 1: JS
+  // conversion sends null, false and "" to 0 without complaint, and the two
+  // fast-pathed ones never even call ToNumber. The config-file shape is the one
+  // worth naming, since JSON has no undefined and a missing brightness arrives
+  // as null. 0 cannot be the sentinel for any of it, because 0 is a level a
+  // script may legitimately ask for, so the type is checked before conversion.
+  const char *not_numbers[] = {
+      "sys.backlight(undefined)",
+      "sys.backlight(null)",
+      "sys.backlight(true)",
+      "sys.backlight(false)",
+      "sys.backlight(NaN)",
+      R"(sys.backlight(""))",
+      R"(sys.backlight("80"))",
+      R"(sys.backlight("bright"))",
+      R"(sys.backlight({ valueOf() { return 50; } }))",
+      // The two that are colloquially numbers and are not ones by tag: a boxed
+      // Number is an object, and a BigInt has its own tag. Both are the kind of
+      // rejection that reads as a firmware bug rather than a caller bug.
+      "sys.backlight(new Number(80))",
+      "sys.backlight(80n)",
+  };
+  for (const char *call : not_numbers) {
+    host_hooks_reset();
+    const std::string src = std::string("let threw = false;\ntry { ") + call +
+                            "; } catch (e) { threw = e instanceof TypeError; }\n"
+                            "console.log('blconv=' + threw);";
+    const std::string name = std::string("sys: ") + call + " throws";
+    expect_output(name.c_str(), src.c_str(), "blconv=true");
+    check_eq((name + ", never reaching the host").c_str(),
+             host_backlight_call_count(), 0);
+    check_eq((name + ", leaving the level alone").c_str(), (int)host_backlight(), 100);
+  }
+
+  // The string hint is the only part of the message a caller acts on, and it is
+  // the case most likely to read as a bug in the firmware rather than in the
+  // call, so it is asserted rather than left riding on `instanceof TypeError`
+  // like the rows above. Without this, inverting the ternary that produces it
+  // leaves every other assertion green.
+  host_hooks_reset();
+  expect_output("sys: rejecting a string says to convert it",
+                R"JS(
+                  try { sys.backlight("80"); }
+                  catch (e) { console.log('blmsg=' + /convert the string first/.test(e.message)); }
+                )JS",
+                "blmsg=true");
+  // And the hint belongs only to that case, which is the half an inverted
+  // ternary would still satisfy.
+  host_hooks_reset();
+  expect_output("sys: rejecting a non-string does not mention strings",
+                R"JS(
+                  try { sys.backlight(null); }
+                  catch (e) { console.log('blmsg2=' + /convert the string/.test(e.message)); }
+                )JS",
+                "blmsg2=false");
+
+  // The other edge, so the rejection cannot have widened into a legal call. Each
+  // row is seeded with a level that is NOT the one it expects and then counts two
+  // calls, which is what the clamp cases above do and for the same reason: the
+  // Infinity row expects 100, and 100 is both the resting value and whatever an
+  // out-of-range cast might land on if someone deleted the clamp. Seeding is what
+  // keeps that row failing for its own reason rather than by luck.
+  struct { const char *call; int want; } converts[] = {
+      {"sys.backlight(Infinity)", 100},
+      {"sys.backlight(-Infinity)", 0},
+      {"sys.backlight(1e300)", 100},
+      {"sys.backlight(62.7)", 62},
+      {"sys.backlight(0)", 0},
+      {"sys.backlight(100)", 100},
+  };
+  for (const auto &c : converts) {
+    host_hooks_reset();
+    // 37 is not any row's expectation, and not the resting value either.
+    const std::string src = std::string("sys.backlight(37); ") + c.call + ";";
+    const std::string name = std::string("sys: ") + c.call + " reaches the host";
+    if (!run_script(src.c_str())) {
+      bad(name.c_str(), "evaluation threw");
+    } else {
+      check_eq((name + ", after the seed").c_str(), host_backlight_call_count(), 2);
+      check_eq((name + " as " + std::to_string(c.want)).c_str(), (int)host_backlight(),
+               c.want);
+    }
+    jsvm_stop();
+    host_settle();
+  }
+}
+
 void sys_info_and_heap_have_the_documented_shape() {
   expect_output("sys: info() reports the fields scripts read",
                 R"JS(
@@ -291,6 +400,7 @@ int main() {
 
   sys_reports_what_the_hooks_say();
   sys_backlight_clamps_and_reaches_the_host();
+  sys_backlight_without_an_argument_throws();
   sys_info_and_heap_have_the_documented_shape();
   sys_pin_reads_and_writes_storage();
   fs_round_trips_a_file();

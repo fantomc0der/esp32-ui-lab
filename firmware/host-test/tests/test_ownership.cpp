@@ -255,21 +255,30 @@ void a_handler_may_clean_its_own_screen() {
 //
 // What this deliberately does *not* prove is the trampoline's widget dup, and the
 // reason is not the one it looks like. Deleting that dup together with its matching
-// JS_FreeValue leaves all 29 assertions green, and not because the wrapper is freed
-// and the throw coincides: the wrapper is never freed at all. JS_Call always passes
-// JS_CALL_FLAG_COPY_ARGV (quickjs.c:20378), so the arg-copy condition at :17632
-// holds whatever argc is, and the callee dups every argument into its own frame at
-// :17656. `self` is rooted by that frame for the whole call, so the binding dropping
-// its reference mid-handler takes the refcount to 1, not to 0. Measured rather than
-// argued: with the dup gone, a handler that deletes its widget and then churns 20000
-// allocations still reads `self` with no sanitizer report. For a JS closure the
-// widget dup is therefore redundant, and nothing asserted here can distinguish it.
-// See the limits list in docs/host-test.md.
+// JS_FreeValue leaves every assertion in this suite green, and not because the
+// wrapper is freed and the throw coincides: in *this* case the wrapper is never
+// freed. JS_Call always passes JS_CALL_FLAG_COPY_ARGV (quickjs.c:20378), so the
+// condition at :17632 holds whatever argc is, and a bytecode callee copies its
+// arguments into its own frame at :17655, one js_dup per declared parameter. The
+// handler here declares `self`, so it gets a reference of its own for the frame's
+// lifetime, and the binding dropping its reference mid-handler takes the refcount
+// to 1 rather than to 0. Measured rather than argued: with the dup gone, a handler
+// that deletes its widget and then churns 20000 allocations still reads `self` with
+// no sanitizer report.
 //
-// Keeping the dup is still right: it is the ownership rule this file's header
-// states, JS_Call's arg copying is one engine version's implementation detail, and
-// deleting only the dup while leaving the JS_FreeValue *is* caught here as an
-// over-release. The fn dup is covered outright, by the case above this one.
+// Be exact about the scope, because two neighbouring shapes do not get that
+// protection. The copy is sized by the callee's declared parameter count
+// (arg_allocated_size = b->arg_count at :17633, gated at :17651), so a handler
+// declaring no parameters gets no copy and arg_buf stays the borrowed argv from
+// :17645 — which is the shape of a_handler_may_clean_its_own_screen two cases up,
+// where what keeps the wrapper alive is that script's own `const b`. And the copy
+// is bytecode-only: :17620-17628 hands argv straight to call_func for a native or
+// bound-to-native callable, which .on() accepts. Neither shape reads the widget
+// after triggering the delete today, which is why the mutation still survives, but
+// the dup is what makes that a property of the trampoline rather than of the
+// handler someone happens to write. It stays for that reason, and because deleting
+// it while leaving the JS_FreeValue *is* caught here, as an over-release. The fn
+// dup is covered outright, by the case above this one. See docs/host-test.md.
 //
 // One trap worth recording, since it cost a round: `typeof self` looks like it
 // touches the wrapper and does not. A JSValue carries its tag inline, so typeof

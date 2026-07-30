@@ -26,7 +26,9 @@ QuickJS treats the reported usable size as *writable capacity* and fills it to t
 
 ## Trap 3: the Xtensa `int32_t` type mismatch
 
-This toolchain typedefs `int32_t` as `long int`, not `int`. They're the same width, but GCC 14 hard-errors on mixed `int*`/`int32_t*` arguments, which upstream QuickJS-ng trips in five places. The vendored copy carries five one-line local-variable type fixes, each marked with an `xtensa` comment (grep `int32_t is long`). Re-check after re-vendoring: `xtensa-esp32s3-elf-gcc -fsyntax-only -std=gnu17 -D_GNU_SOURCE -I. quickjs.c` surfaces all of them in seconds without a full sketch build.
+This toolchain typedefs `int32_t` as `long int`, not `int`. They're the same width, but GCC 14 hard-errors on mixed `int*`/`int32_t*` arguments, which upstream QuickJS-ng trips in five places. The vendored copy carries five one-line local-variable type fixes, each still marked with an `xtensa` comment, but the record of the delta is [`firmware/quickjs-ng/patches/0001-xtensa-int32-pointer-types.patch`](../firmware/quickjs-ng/patches/0001-xtensa-int32-pointer-types.patch) — one patch, since all five share a root cause and would be a single upstream PR. It is in `git format-patch` form so the rationale travels with it and it can be `git am`-ed upstream unchanged.
+
+Re-vendoring is therefore not a hand-edit any more: `.\tools\vendor-quickjs.ps1 -Target <tag>` replays that patch onto the new upstream via a rebase, so moved code produces conflict markers instead of silently dropping a fix (see [`firmware/quickjs-ng/README.md`](../firmware/quickjs-ng/README.md)). Re-check the result anyway, since a *successful* rebase still cannot know whether upstream introduced a sixth site: `xtensa-esp32s3-elf-gcc -fsyntax-only -std=gnu17 -D_GNU_SOURCE -I. quickjs.c` surfaces all of them in seconds without a full sketch build.
 
 ## Trap 4: DTR/RTS can trap the board in the ROM bootloader
 

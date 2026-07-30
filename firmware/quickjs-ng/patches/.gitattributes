@@ -1,0 +1,4 @@
+# This repo checks out with core.autocrlf=true. A patch checked out CRLF would make `git am`
+# apply CRLF-terminated lines into upstream's LF sources, so the result would not match
+# upstream byte for byte. Keep patch bytes exactly as committed.
+*.patch -text

@@ -176,8 +176,10 @@ gh api graphql -f query='
     }
   }
 }' --jq '.data.repository.pullRequest.reviewThreads.nodes[]
-         | "\(.id)\tresolved=\(.isResolved)\toutdated=\(.isOutdated)\t\(.path):\(.line)"'
+         | "\(.id)\t\(.comments.nodes[0].databaseId)\tresolved=\(.isResolved)\toutdated=\(.isOutdated)\t\(.path):\(.line)"'
 ```
+
+That prints both identifiers each thread needs, and they are different things: the `PRRT_...` thread id resolves it, while the numeric `databaseId` of its first comment is the parent the reply attaches to.
 
 For each unresolved thread, reply first and resolve second. Both halves matter: the reply is what a later reader and the next review see, and resolving without one leaves the merge unblocked but the reasoning nowhere.
 

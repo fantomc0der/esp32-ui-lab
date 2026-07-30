@@ -14,7 +14,7 @@ The design principle here is that **the gate is the ruleset on `main`, not a wor
 6. If the review passed, the second job arms GitHub's native auto-merge. It performs no checks of its own: it sets a flag and exits.
 7. GitHub merges when *its* conditions hold: every required check green on the head SHA, every review conversation resolved, not a draft, and the branch up to date with `main`. Then it squashes and deletes the branch.
 
-Conversation resolution is the condition that surprises people, because nothing in the check list shows it. A review that votes `REVIEW: PASS` and leaves non-blocking inline remarks turns `review` green and still holds the merge: the PR reports `BLOCKED` with `mergeable: MERGEABLE` and four green checks. Reply to each thread saying what you did about it and resolve it, and the merge proceeds. Outdated threads, whose lines are no longer in the diff, count the same as current ones.
+Conversation resolution is the condition that surprises people, because nothing in the check list shows it. A review that votes `REVIEW: PASS` and leaves non-blocking inline remarks turns `review` green and still holds the merge: the PR reports `BLOCKED` with `mergeable: MERGEABLE` and every check green. Reply to each thread saying what you did about it and resolve it, and the merge proceeds. Outdated threads, whose lines are no longer in the diff, count the same as current ones.
 
 If anything fails, nothing happens and the PR stays open. Push more commits, the review re-runs on `synchronize`, and GitHub re-evaluates. If you decide mid-review that a PR needs more work, convert it back to a draft.
 
@@ -27,6 +27,13 @@ If anything fails, nothing happens and the PR stays open. Push more commits, the
 ## Repository state this depends on
 
 Half of this automation is not in the repo. It lives in GitHub settings, where it is invisible to any diff, survives no fork or clone, and can be changed without leaving a trace in the history. This section records what must be true. When the automation misbehaves in a way the workflow logs do not explain, check these first.
+
+Read the live ruleset rather than trusting this page, which can only ever be a record of intent:
+
+```bash
+gh api repos/{owner}/{repo}/rulesets --jq '.[] | "\(.id)\t\(.name)\t\(.enforcement)"'
+gh api repos/{owner}/{repo}/rulesets/<id> --jq '.rules[] | {type: .type, params: .parameters}'
+```
 
 **Ruleset on `main`**, active, targeting the default branch, with no bypass actors:
 

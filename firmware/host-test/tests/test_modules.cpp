@@ -128,6 +128,11 @@ void sys_backlight_without_an_argument_throws() {
       R"(sys.backlight("80"))",
       R"(sys.backlight("bright"))",
       R"(sys.backlight({ valueOf() { return 50; } }))",
+      // The two that are colloquially numbers and are not ones by tag: a boxed
+      // Number is an object, and a BigInt has its own tag. Both are the kind of
+      // rejection that reads as a firmware bug rather than a caller bug.
+      "sys.backlight(new Number(80))",
+      "sys.backlight(80n)",
   };
   for (const char *call : not_numbers) {
     host_hooks_reset();
@@ -140,6 +145,28 @@ void sys_backlight_without_an_argument_throws() {
              host_backlight_call_count(), 0);
     check_eq((name + ", leaving the level alone").c_str(), (int)host_backlight(), 100);
   }
+
+  // The string hint is the only part of the message a caller acts on, and it is
+  // the case most likely to read as a bug in the firmware rather than in the
+  // call, so it is asserted rather than left riding on `instanceof TypeError`
+  // like the rows above. Without this, inverting the ternary that produces it
+  // leaves every other assertion green.
+  host_hooks_reset();
+  expect_output("sys: rejecting a string says to convert it",
+                R"JS(
+                  try { sys.backlight("80"); }
+                  catch (e) { console.log('blmsg=' + /convert the string first/.test(e.message)); }
+                )JS",
+                "blmsg=true");
+  // And the hint belongs only to that case, which is the half an inverted
+  // ternary would still satisfy.
+  host_hooks_reset();
+  expect_output("sys: rejecting a non-string does not mention strings",
+                R"JS(
+                  try { sys.backlight(null); }
+                  catch (e) { console.log('blmsg2=' + /convert the string/.test(e.message)); }
+                )JS",
+                "blmsg2=false");
 
   // The other edge, so the rejection cannot have widened into a legal call. Each
   // row is seeded with a level that is NOT the one it expects and then counts two

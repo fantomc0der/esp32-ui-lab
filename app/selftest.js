@@ -352,6 +352,11 @@ check("sys.battery is a number or null", () => {
   return b === null || typeof b === "number";
 });
 check("sys.backlight accepts a percent", () => { sys.backlight(80); return true; });
+// The panel staying lit through this check is half the assertion: a no-argument
+// call used to be read as "set it to 0" and dim it to the PWM floor.
+check("sys.backlight with no argument throws", () => {
+  try { sys.backlight(); return false; } catch (e) { return e instanceof TypeError; }
+});
 check("console.log accepts many args", () => { console.log("  (console ok)", 1, true); return true; });
 
 // ---------------------------------------------------------------- async

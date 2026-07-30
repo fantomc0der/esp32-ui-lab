@@ -39,9 +39,15 @@ static JSValue js_sys_fps(JSContext *ctx, JSValueConst, int, JSValueConst *) {
   return JS_NewUint32(ctx, jsvm_host_fps());
 }
 
+// Setter only, and it throws rather than reading, because the host hook is
+// write-only and the board keeps no readable level. Every other sys reading is
+// a no-argument getter, so `sys.backlight()` reads like one too; answering that
+// as a set-to-zero dims the panel to its PWM floor, which looks like a crashed
+// board rather than a mistake in the script.
 static JSValue js_sys_backlight(JSContext *ctx, JSValueConst, int argc, JSValueConst *argv) {
+  if (argc < 1) return JS_ThrowTypeError(ctx, "backlight(pct) needs a percent");
   int32_t pct = 0;
-  if (argc >= 1) JS_ToInt32(ctx, &pct, argv[0]);
+  if (JS_ToInt32(ctx, &pct, argv[0])) return JS_EXCEPTION;
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
   jsvm_host_backlight(static_cast<uint8_t>(pct));

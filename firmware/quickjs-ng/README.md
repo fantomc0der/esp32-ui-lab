@@ -4,7 +4,7 @@
 
 ## Local modifications
 
-Everything in `src/` is upstream except one patch, kept in `patches/` rather than only inline: five type fixes in `quickjs.c` where a local's type does not match the pointer its callee takes. On the Xtensa toolchain `int32_t` is `long int` rather than `int`, so four `int` locals passed to functions taking `int32_t*` (and one `int32_t` local passed to a function taking `int*`) are incompatible-pointer errors under GCC 14. The sites still carry an `xtensa` comment, but `patches/0001-xtensa-int32-pointer-types.patch` is the authoritative record of the delta, in `git format-patch` form so it is `git am`-able and can go upstream as-is.
+Everything in `src/` is upstream except one patch, kept in `patches/` rather than only inline: five type fixes in `quickjs.c` where a local's type does not match the pointer its callee takes. On the Xtensa toolchain `int32_t` is `long int` rather than `int`, so four `int` locals passed to functions taking `int32_t*` (and one `int32_t` local passed to a function taking `int*`) are incompatible-pointer errors under GCC 14. The sites still carry an `xtensa` comment, but [`patches/0001-xtensa-int32-pointer-types.patch`](patches/0001-xtensa-int32-pointer-types.patch) is the authoritative record of the delta, in `git format-patch` form so it is `git am`-able and can go upstream as-is.
 
 `src/` holds the patched, working code; the patch is what regenerates it from pristine upstream, not a pending change.
 

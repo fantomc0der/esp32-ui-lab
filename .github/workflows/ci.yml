@@ -70,12 +70,16 @@ jobs:
       - name: Check the built apps match their sources
         run: node tools/build-app.mjs --check
 
+      # .patch is in the list because tools/vendor-quickjs.ps1 regenerates the
+      # vendored patches with `git format-patch`, which names the file after the
+      # commit subject — so rewording that subject renames the file the docs
+      # link to.
       - name: Check relative links in docs
         run: |
           fail=0
           for f in $(git ls-files '*.md'); do
             dir=$(dirname "$f")
-            for l in $(grep -o '](\([^)#]*\.\(md\|js\|ino\)\)[^)]*)' "$f" | sed 's/^](//; s/[)#].*$//'); do
+            for l in $(grep -o '](\([^)#]*\.\(md\|js\|ino\|patch\)\)[^)]*)' "$f" | sed 's/^](//; s/[)#].*$//'); do
               case "$l" in http*) continue;; esac
               target=$(realpath -m --relative-to=. "$dir/$l")
               if [ ! -f "$target" ]; then echo "broken: $f -> $l"; fail=1; fi

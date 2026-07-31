@@ -1,6 +1,6 @@
 ---
 name: implement-change
-description: Takes a change from a one-line prompt all the way to merged. Creates the branch, implements the change by delegating to an autonomous execution skill, opens a draft PR, waits for CI, marks it ready, handles Claude review feedback, and confirms the squash-merge lands. Use when the user invokes it with the work as an argument, or says "implement and ship X", "build X and get it merged", "take X all the way", or otherwise asks for a change carried to main without further input.
+description: Takes a change from a one-line prompt all the way to merged. Creates the branch, implements the change by delegating to an autonomous execution skill, opens a draft PR, waits for CI, marks it ready, handles Claude review feedback, confirms the squash-merge lands, and closes the originating GitHub issue if the prompt named one. Use when the user invokes it with the work as an argument, or says "implement and ship X", "build X and get it merged", "take X all the way", or otherwise asks for a change carried to main without further input.
 compatibility: Requires git and the gh CLI, both installed and authenticated.
 ---
 
@@ -46,8 +46,9 @@ Copy this checklist and check items off as you go:
 - [ ] Step 6: `review` check green
 - [ ] Step 7: Every review thread answered and resolved
 - [ ] Step 8: Merge confirmed
-- [ ] Step 9: Branch cleaned up
-- [ ] Step 10: Reported to the user
+- [ ] Step 9: Issue closed and commented on, if the prompt named one
+- [ ] Step 10: Branch cleaned up
+- [ ] Step 11: Reported to the user
 ```
 
 ### Step 1 — Create the branch, before any code is written
@@ -258,7 +259,30 @@ gh api repos/{owner}/{repo}/rulesets/<id> --jq '.rules[] | {type: .type, params:
 
 Only as a genuine last resort, and after telling the user why, merge by hand with `gh pr merge <PR> --squash`.
 
-### Step 9 — Clean up the branch
+### Step 9 — Close the issue, if the prompt named one
+
+Only applies when the work came in attached to a GitHub issue: the prompt cited an issue number or URL, or the user handed one over as the argument. If no issue was named, skip this step.
+
+Do it **after** the merge is confirmed in Step 8, never before. An issue closed while the PR is still open is a lie about the state of the repo, and reopening it costs more than waiting did.
+
+Leave a comment first, then close:
+
+```bash
+gh issue comment <N> --body '...'
+gh issue close <N>
+```
+
+The comment is short: two or three sentences on what actually merged, plus the PR link. It is read by someone who has the issue open and not the diff, so say what changed rather than restating the issue. Name the same caveat the report carries: if the change touched `firmware/` and was never flashed to a board, say so here too, since this comment outlives the conversation.
+
+The PR body may already have closed the issue on merge, if it carried a `Closes #<N>` line. That is fine and is not a reason to skip the comment: check the state, comment either way, and only run `gh issue close` if it is still open.
+
+```bash
+gh issue view <N> --json state,closedAt --jq '"\(.state) \(.closedAt // "")"'
+```
+
+Closing an issue is outward-facing and hard to take back, so close only the issue the prompt named. If the merged change happens to resolve others, say so in the comment and leave them to the user.
+
+### Step 10 — Clean up the branch
 
 ```bash
 git checkout main
@@ -268,11 +292,12 @@ git branch -d <branch-name>
 
 The remote branch is deleted automatically by the repo's "Automatically delete head branches" setting. Do not run `git push origin --delete`; the branch is already gone and the command will error.
 
-### Step 10 — Report completion
+### Step 11 — Report completion
 
 Tell the user:
 - What was built, in a sentence, and how it differs from the prompt if it does.
 - PR number, title, and merge commit SHA.
+- The issue number and its state, if the prompt named one.
 - **What was and was not verified.** If the change touched `firmware/` and was not flashed to a board, say so explicitly. A merged PR with green checks is not a tested firmware change, and this is the moment where that distinction is easiest to lose.
 - Any notable issues and how they were resolved (CI failures, review feedback, problems in the delegated run).
 - Confirmation that the branch is deleted and `main` is checked out.
@@ -285,4 +310,5 @@ Repo conventions live in `CLAUDE.md` and are not repeated here. These are the ru
 - Never force-push or skip hooks (`--force`, `--no-verify`) without explicit user instruction.
 - Never merge by hand to get past a stuck gate without telling the user why. A stuck gate is usually an unresolved review thread and occasionally a real misconfiguration, and both are worth diagnosing rather than bypassing; see Step 8.
 - Never resolve a review thread without a reply saying what you did about it, and never resolve one to clear the merge gate when the point is still open. Resolving is the one action in this lifecycle that removes a gate on your own authority; see Step 7.
-- Never report a change as verified when only CI ran. See Step 10.
+- Never report a change as verified when only CI ran. See Step 11.
+- Never close an issue before the merge is confirmed, and never close one the prompt did not name. See Step 9.

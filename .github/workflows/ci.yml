@@ -25,9 +25,9 @@ jobs:
     name: scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -91,12 +91,12 @@ jobs:
     name: firmware
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The esp32 core is a large download; without this the job spends most
       # of its time re-fetching a toolchain that never changes.
       - name: Cache Arduino cores and libraries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.arduino15
@@ -151,7 +151,7 @@ jobs:
     name: host-test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the toolchain
         run: sudo apt-get update && sudo apt-get install -y ninja-build
@@ -184,7 +184,7 @@ jobs:
       # and cost a full re-clone on every edit to a file this target expects to be
       # edited.
       - name: Cache the LVGL clone
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             firmware/host-test/.build/_deps/lvgl-src

@@ -1,2 +1,3 @@
 -D_GNU_SOURCE
 -DNDEBUG
+-fno-strict-aliasing

@@ -80,6 +80,20 @@ UISELFTEST 17 passed, 0 failed
 
 Unlike the binding selftest, most of this ground *is* covered without hardware — [`tools/test-ui.mjs`](../tools/test-ui.mjs) runs the reconciler against a fake `lv` in CI, and covers more cases than this does, since a mock can count widget creations and inspect the props of each `.set()`. What only the board can show is that the bookkeeping matches LVGL: that `lv_obj_move_to_index` really reorders, that a deleted widget really invalidates its handle, and that a render deferred into a promise microtask really lands within a frame. Run it after changing [`app/lib/ui.js`](../app/lib/ui.js), then put the launcher back with `.\push.ps1 app\app.js`.
 
+## Checking the engine
+
+[`app/engine-probe.js`](../app/engine-probe.js) tests QuickJS-ng itself rather than the bindings, and is deployed the same way:
+
+```powershell
+.\push.ps1 app\engine-probe.js -Dest /app.js
+```
+
+```
+ENGINEPROBE 49 passed, 0 failed, 0 skipped
+```
+
+It covers the engine code a re-vendor or a compiler-flag change can break on this toolchain: the sites upstream retyped for Xtensa, string iteration (the miscompile in [engine-notes.md](engine-notes.md), Trap 5), regex, Unicode tables, number formatting, promises, and the recursion limit. A check whose feature the engine lacks reports `SKIP` rather than passing. Run it after re-vendoring QuickJS or changing a board's `build_opt.h`, and after changing flags rebuild with `arduino-cli compile --clean` first, since cached library objects can hide the change. Then put the launcher back with `.\push.ps1 app\app.js`.
+
 ## Serial commands & the REPL
 
 While the firmware runs, the serial port accepts one line at a time:

@@ -4,7 +4,7 @@
 
 ## Local modifications
 
-None: `src/` is byte-identical to upstream at the pinned commit. Through v0.15.1 this folder carried a local patch for five Xtensa `int32_t` pointer-type mismatches, which upstream fixed in v0.17.0; the history is in [`docs/engine-notes.md`](../../docs/engine-notes.md).
+None to the source: `src/` is byte-identical to upstream at the pinned commit. One upstream Xtensa miscompile is worked around with a build flag instead, `-fno-strict-aliasing`, described below. Through v0.15.1 this folder carried a local patch for five Xtensa `int32_t` pointer-type mismatches, which upstream fixed in v0.17.0; the history is in [`docs/engine-notes.md`](../../docs/engine-notes.md).
 
 ## Re-vendoring
 

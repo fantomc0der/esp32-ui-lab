@@ -118,7 +118,7 @@ The REPL shares the app's global scope, so `sys.heap()`, poking widgets held in 
 [touch] AXS5106L ok, id = 51 06 01
 [app] storage: sd ok, flash ok
 [app] running /app.js
-[js] vm ready: 90048 bytes to start, 8203788 free for scripts
+[js] vm ready: 155516 bytes to start, 8107152 free for scripts
 launcher: 3 app(s) found
 [js] /app.js: eval ok in 74 ms
 [app] ready — serial is a JS REPL; 'reload' restarts the app, 'home' opens the launcher

@@ -51,7 +51,7 @@ export function makeSys(over = {}) {
     battery: () => 4.02,
     backlight: pct => pct,
     info: () => ({ model: "ESP32-S3", rev: 0, cores: 2, mhz: 240, flashMB: 16,
-                   psramMB: 8, lvgl: "9.5.0", quickjs: "0.15.1" }),
+                   psramMB: 8, lvgl: "9.5.0", quickjs: "0.17.0" }),
     launch: () => true,
     pin: () => true,
     unpin: () => true,

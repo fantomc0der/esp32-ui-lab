@@ -1,6 +1,6 @@
 # QuickJS-ng on the ESP32-S3: measurements and traps
 
-Engine-level knowledge collected while bringing QuickJS-ng up on this board. The vendored engine itself (version, patches, how sketches link it) is documented next to the code in [`firmware/quickjs-ng/README.md`](../firmware/quickjs-ng/README.md); this page records what was measured and what bit us, so nobody has to rediscover it.
+Engine-level knowledge collected while bringing QuickJS-ng up on this board. The vendored engine itself (version, how sketches link it) is documented next to the code in [`firmware/quickjs-ng/README.md`](../firmware/quickjs-ng/README.md); this page records what was measured and what bit us, so nobody has to rediscover it.
 
 ## Phase 1 spike measurements (hardware, 2026-07-25)
 
@@ -24,11 +24,11 @@ QuickJS treats the reported usable size as *writable capacity* and fills it to t
 
 `JS_ExecutePendingJob` is normally driven by quickjs-libc's event loop, which is not vendored (it needs POSIX). Without pumping it yourself, `.then()` callbacks and `async`/`await` continuations queue forever and never run — everything else works, which makes it easy to miss. The firmware pumps the queue once per `loop()` (`jsvm_pump()`).
 
-## Trap 3: the Xtensa `int32_t` type mismatch
+## Trap 3: the Xtensa `int32_t` type mismatch (fixed upstream in v0.17.0)
 
-This toolchain typedefs `int32_t` as `long int`, not `int`. They're the same width, but GCC 14 hard-errors on mixed `int*`/`int32_t*` arguments, which upstream QuickJS-ng trips in five places. The vendored copy carries five one-line local-variable type fixes, each still marked with an `xtensa` comment, but the record of the delta is [`firmware/quickjs-ng/patches/0001-xtensa-int32-pointer-types.patch`](../firmware/quickjs-ng/patches/0001-xtensa-int32-pointer-types.patch) — one patch, since all five share a root cause and would be a single upstream PR. It is in `git format-patch` form so the rationale travels with it and it can be `git am`-ed upstream unchanged.
+This toolchain typedefs `int32_t` as `long int`, not `int`. They're the same width, but GCC 14 hard-errors on mixed `int*`/`int32_t*` arguments, and QuickJS-ng up to v0.16.x tripped that in five places (`find_line_num`, `js_parseInt`, `remainingElementsCount_add`, `js_promise_all_resolve_element`, `js_atomics_notify`), each a local whose type did not match the pointer its callee takes. Through v0.15.1 the vendored copy carried five one-line local-variable type fixes as a local patch, which `tools/vendor-quickjs.ps1` replayed onto each new upstream with a rebase.
 
-Re-vendoring is therefore not a hand-edit any more: `.\tools\vendor-quickjs.ps1 -Target <tag>` replays that patch onto the new upstream via a rebase, so moved code produces conflict markers instead of silently dropping a fix (see [`firmware/quickjs-ng/README.md`](../firmware/quickjs-ng/README.md)). Re-check the result anyway, since a *successful* rebase still cannot know whether upstream introduced a sixth site: `xtensa-esp32s3-elf-gcc -fsyntax-only -std=gnu17 -D_GNU_SOURCE -I. quickjs.c` surfaces all of them in seconds without a full sketch build.
+Upstream made the same five changes in [quickjs-ng#1657](https://github.com/quickjs-ng/quickjs/pull/1657) (commit `d8e1cc6`, fixing issue #1624), first released in v0.17.0. From that version on the vendored engine is unmodified upstream, and the patch and its replay machinery are gone. If a later upstream reintroduces a mismatch, the sketch build fails loudly; `xtensa-esp32s3-elf-gcc -fsyntax-only -std=gnu17 -D_GNU_SOURCE -I. quickjs.c` surfaces every site in seconds without a full sketch build.
 
 ## Trap 4: DTR/RTS can trap the board in the ROM bootloader
 

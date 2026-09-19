@@ -74,8 +74,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(lvgl)
 
 # ---- quickjs-ng -------------------------------------------------------------
-# The vendored copy, unmodified, so the host runs the same engine as the board
-# (including the five Xtensa int32_t fixes, which are correct on x86-64 too).
+# The vendored copy, unmodified, so the host runs the same engine as the board.
 # The four .c files the vendored copy ships; cutils is header-only here.
 add_library(host_quickjs STATIC
   ${QUICKJS_DIR}/quickjs.c

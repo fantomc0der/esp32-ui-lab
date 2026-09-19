@@ -85,8 +85,10 @@ add_library(host_quickjs STATIC
 target_include_directories(host_quickjs PUBLIC ${QUICKJS_DIR})
 target_compile_definitions(host_quickjs PRIVATE _GNU_SOURCE)
 # Third-party code we do not maintain: build it quietly so our own warnings are
-# the ones visible, but keep it under the sanitizers.
-target_compile_options(host_quickjs PRIVATE -w)
+# the ones visible, but keep it under the sanitizers. -fno-strict-aliasing
+# compiles the engine as the board does (its build_opt.h applies the flag to
+# every source there; here only QuickJS needs it). See engine-notes.md, Trap 5.
+target_compile_options(host_quickjs PRIVATE -w -fno-strict-aliasing)
 
 # ---- the binding layer + stubs ---------------------------------------------
 # jsvm_app.cpp is deliberately absent. It is the supervisor — the boot chain, the

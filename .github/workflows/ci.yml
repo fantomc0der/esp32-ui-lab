@@ -83,6 +83,21 @@ jobs:
           done
           exit $fail
 
+      # QuickJS needs these on every board, and a sketch without them still
+      # builds: missing -fno-strict-aliasing only shows as a string for...of
+      # that hangs the board (docs/engine-notes.md, Trap 5).
+      - name: Check every board passes the engine's build flags
+        run: |
+          fail=0
+          for b in firmware/boards/*/; do
+            for flag in -D_GNU_SOURCE -DNDEBUG -fno-strict-aliasing; do
+              if ! tr -d '\r' < "$b/build_opt.h" 2>/dev/null | grep -qx -- "$flag"; then
+                echo "$b/build_opt.h is missing $flag"; fail=1
+              fi
+            done
+          done
+          exit $fail
+
   firmware:
     name: firmware
     runs-on: ubuntu-latest

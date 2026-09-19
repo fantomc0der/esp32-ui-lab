@@ -24,12 +24,20 @@ QuickJS treats the reported usable size as *writable capacity* and fills it to t
 
 `JS_ExecutePendingJob` is normally driven by quickjs-libc's event loop, which is not vendored (it needs POSIX). Without pumping it yourself, `.then()` callbacks and `async`/`await` continuations queue forever and never run — everything else works, which makes it easy to miss. The firmware pumps the queue once per `loop()` (`jsvm_pump()`).
 
-## Trap 3: the Xtensa `int32_t` type mismatch (fixed upstream in v0.17.0)
+## Trap 3: the Xtensa `int32_t` type mismatch (compile errors fixed upstream in v0.17.0; see Trap 5)
 
 This toolchain typedefs `int32_t` as `long int`, not `int`. They're the same width, but GCC 14 hard-errors on mixed `int*`/`int32_t*` arguments, and QuickJS-ng up to v0.16.x tripped that in five places (`find_line_num`, `js_parseInt`, `remainingElementsCount_add`, `js_promise_all_resolve_element`, `js_atomics_notify`), each a local whose type did not match the pointer its callee takes. Through v0.15.1 the vendored copy carried five one-line local-variable type fixes as a local patch, which `tools/vendor-quickjs.ps1` replayed onto each new upstream with a rebase.
 
-Upstream made the same five changes in [quickjs-ng#1657](https://github.com/quickjs-ng/quickjs/pull/1657) (commit `d8e1cc6`, fixing issue #1624), first released in v0.17.0. From that version on the vendored engine is unmodified upstream, and the patch and its replay machinery are gone. If a later upstream reintroduces a mismatch, the sketch build fails loudly; `xtensa-esp32s3-elf-gcc -fsyntax-only -std=gnu17 -D_GNU_SOURCE -I. quickjs.c` surfaces every site in seconds without a full sketch build.
+Upstream made the same five changes in [quickjs-ng#1657](https://github.com/quickjs-ng/quickjs/pull/1657) (commit `d8e1cc6`, fixing issue #1624), first released in v0.17.0. From that version on the vendored engine is unmodified upstream, and the patch and its replay machinery are gone. A later upstream that reintroduces a plain mismatch fails the sketch build loudly, and `xtensa-esp32s3-elf-gcc -fsyntax-only -std=gnu17 -D_GNU_SOURCE -I. quickjs.c` surfaces those sites in seconds without a full sketch build. It does not catch a mismatch hidden behind an explicit pointer cast, which compiles cleanly and is miscompiled instead; one such site remains, described in Trap 5.
 
 ## Trap 4: DTR/RTS can trap the board in the ROM bootloader
 
 Opening the native-USB COM port with DTR and RTS both asserted can reset the S3 into the ROM bootloader — the only serial output is `ESP-ROM:esp32s3-20210327` and the sketch never runs. Recover with an esptool-style sequence: open with both deasserted, pulse RTS high for ~100 ms, drop it, *then* assert DTR (needed for CDC to transmit) and read.
+
+## Trap 5: string iteration never advances (open)
+
+`for (const c of str)`, `[...str]` and `Array.from(str)` return the first BMP character forever, so the loop either runs the heap out (`InternalError: out of memory`) or, if it drops each value, spins until the board is reset. `"ab"[Symbol.iterator]()` shows it directly: a second `.next()` returns `"a"` again. Both v0.15.1 and v0.17.0 do this on the board, while upstream v0.17.0 built for x86 (64- and 32-bit, `-O2` and `-Os`) is correct. No shipped app iterates over a string.
+
+The cause is the Trap 3 root cause wearing a cast. `js_string_iterator_next` declares `uint32_t idx` and calls `string_getc(p, (int *)&idx)`. On Xtensa `uint32_t` is `unsigned long`, which may not alias `int`, so under strict aliasing GCC decides the call cannot change `idx` and deletes the following `it->idx = idx` as a redundant store; the explicit cast suppresses the diagnostic that caught the other five sites. The `-S` output for the function shows no store to `it->idx` after `call8 string_getc`, and it reappears with `-fno-strict-aliasing`. (An attempt to verify that on the board via `build_opt.h` was inconclusive, because arduino-cli reused library objects built without the flag.)
+
+Candidate fixes: declare `idx` as `int` upstream (a one-line change in the style of quickjs-ng#1657), or add `-fno-strict-aliasing` to `build_opt.h` as a stopgap, at some cost across LVGL and the bindings too. [`app/engine-probe.js`](../app/engine-probe.js) reproduces it as its one failing check, `string iteration by code point`.

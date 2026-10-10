@@ -24,7 +24,10 @@ If anything fails, nothing happens and the PR stays open. Push more commits, the
 
 - `.github/workflows/ci.yml` — the existing hardware-free checks: every board compiles, scripts parse, scripts only call bindings the C layer registers, generated apps are not stale, doc links resolve. Reports `scripts` and `firmware`.
 - `.github/workflows/claude-review.yml` — two jobs. `review` runs the Anthropic action and turns the verdict into the job's conclusion. `arm-auto-merge` needs `review` to have succeeded, then calls `gh pr merge --auto --squash`. Both sit in one concurrency group per PR with `cancel-in-progress`, so a second push supersedes the review still running for the first instead of paying for two that race to rewrite the same sticky comment.
-- `.github/workflows/claude-fix.yml` — on-demand. Comment `@claude <what to change>` on a PR and Claude pushes the change to the branch. Also one concurrency group per PR, but queued rather than cancelling, because a fix run pushes commits and cancelling one partway can leave the work half done.
+- `.github/workflows/claude-fix.yml` — on-demand. Comment `@claude <what to change>` on a PR, in a review comment or in a submitted review, and Claude pushes the change to the branch. Only the owner, members and collaborators can trigger it, because on a public repository anyone can comment and the run pushes with the PAT. Also one concurrency group per PR, but queued rather than cancelling, because a fix run pushes commits and cancelling one partway can leave the work half done.
+- `.github/dependabot.yml` — weekly version updates for GitHub Actions, the one ecosystem Dependabot can see here. Minor and patch bumps arrive grouped in one PR; majors and `anthropics/claude-code-action` arrive on their own. Security alerts and security updates are repository settings, not this file.
+- `.github/workflows/dependabot-auto-merge.yml` — the Dependabot counterpart of `arm-auto-merge`. Arms GitHub's auto-merge on a Dependabot PR when the bump is minor or patch and does not touch `claude-code-action`; everything else waits for a person. See [Dependabot PRs](#dependabot-prs) for why these PRs bypass the review.
+- `.github/workflows/dependabot-fix.yml` — a weekly sweep. If a security alert is still open with no Dependabot PR against it, Claude opens one PR that resolves it, authored by the PAT so the review gates it like any other.
 
 ## Repository state this depends on
 
@@ -61,8 +64,10 @@ The status check contexts are **job** names, not workflow names. `review` comes 
 
 | Secret | What it is | Used by |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | API key from `console.anthropic.com/settings/keys` | `claude-review.yml`, `claude-fix.yml` |
-| `PR_AUTOMATION_PAT` | Fine-grained PAT scoped to this repo with `Contents: write` and `Pull requests: write` | `claude-review.yml`, `claude-fix.yml` |
+| `ANTHROPIC_API_KEY` | API key from `console.anthropic.com/settings/keys` | `claude-review.yml`, `claude-fix.yml`, `dependabot-fix.yml` |
+| `PR_AUTOMATION_PAT` | Fine-grained PAT scoped to this repo with `Contents: write` and `Pull requests: write` | `claude-review.yml`, `claude-fix.yml`, `dependabot-auto-merge.yml`, `dependabot-fix.yml` |
+
+Both are Actions secrets, and a workflow run that Dependabot triggers cannot read Actions secrets at all (GitHub hands those runs a separate, empty set of Dependabot secrets). That single fact shapes everything under [Dependabot PRs](#dependabot-prs) below.
 
 The PAT expires. When it does, arming fails and reviews stop being able to push fixes, both with authentication errors rather than anything that reads as a gate problem. Rotate it rather than extending the expiry indefinitely.
 
@@ -95,6 +100,8 @@ The obvious alternative, and the shape this started from, is a workflow triggere
 
 It exists in repos with no branch protection, where a workflow genuinely is the only available gate. That is not this repo. Handing the decision to GitHub removes the bash, the `workflow_run` plumbing, the concurrency group that keeps two runs for the same SHA from racing, and the head-SHA check that exists only because `workflow_run` can fire for a commit that is no longer current. It also removes a class of bug that the hand-rolled version can have and the native one cannot: disagreeing with the ruleset about what "green" means.
 
+`dependabot-auto-merge.yml` is not an exception to this. It has the word in its name, but it is an arming workflow in the same sense as `arm-auto-merge`: it reads Dependabot's metadata to decide whether to flip the switch, and then GitHub decides when, against the same ruleset. It polls no check runs and merges nothing itself.
+
 There is no `enforce-draft.yml` either. Its job was to convert every new PR to a draft so reviews never fired on unfinished work. Opening the PR as a draft yourself does the same thing without a workflow, a PAT permission, a GraphQL mutation, and a bot comment on every PR. It also removes a race: because that workflow and the review workflow both fire from `opened` and both see the same frozen event payload, the review had to be barred from triggering on `opened` at all to avoid reviewing a PR that was about to become a draft. Without it, `opened` is safe to review on, so a PR opened ready gets reviewed immediately instead of waiting for a click.
 
 ## Why a draft PR shows a red `review`
@@ -107,9 +114,23 @@ So drafts fail the check. The red X means nothing has reviewed this, which is tr
 
 The same reasoning governs the CI wait described in the happy path, and it is why that is a failing *step* inside the review job rather than an `if:` or a `needs:` on the job. Gating the job would be the tidier spelling and would hand out a green `review`, by the same `skipped` mechanism, on every commit with a red build. Both refusals are steps for one reason: a job that does not run still answers the ruleset, and the answer it gives is yes.
 
+The job does carry one `if:`, for Dependabot, and it is there because that answer is the one wanted: a Dependabot PR is meant to merge on CI alone. The next section is about why.
+
+## Dependabot PRs
+
+A workflow run triggered by Dependabot gets a read-only `GITHUB_TOKEN` and none of the repository's Actions secrets. The review cannot run without the API key, so if `review` ran on a Dependabot PR it would fail at the first step that needs one, go red, and block every dependency update forever. Instead the `review` job skips itself when the actor is `dependabot[bot]`, which GitHub counts as satisfying the required check, and a Dependabot PR is gated by `scripts`, `firmware` and `host-test` alone. That is the only place in this setup where a skipped `review` is the intended outcome rather than the trap described above, and it is acceptable because of what these PRs are: a version bump of an action in `.github/workflows/`, which CI exercises by running.
+
+The condition is on the actor, not the PR author. If you push a commit to a Dependabot branch, that push is yours, the run has the secrets, and the review runs on it. Correspondingly `dependabot-auto-merge.yml` only arms on Dependabot's own pushes, so exactly one of the two workflows acts on any given commit.
+
+What then lands on its own is decided by `dependabot-auto-merge.yml` from Dependabot's own metadata, and it is narrow: minor and patch updates, except `anthropics/claude-code-action`. Majors wait for a person. So does the action, at any size of bump, because the review workflow depends on its exact behaviour (the sticky comment header the verdict step scrapes, the inputs it accepts) and on a Dependabot PR nothing runs the new version before it merges. `dependabot.yml` keeps the action out of the weekly group so that refusal holds nothing else back. The pins in `claude-review.yml`, `claude-fix.yml` and `dependabot-fix.yml` are meant to move together, and Dependabot's PR bumps all three; read the release notes, re-read the verdict step, and merge by hand. The ruleset is satisfied by CI alone on that PR, so the ruleset dance described under [Changing the review workflow itself](#changing-the-review-workflow-itself) is not needed for it.
+
+`dependabot-auto-merge.yml` runs on `pull_request_target`, which is the event that gets the base branch's secrets regardless of who the actor is, and it needs the PAT for the same reason `arm-auto-merge` does. `pull_request_target` is also the event that makes checking out the PR head dangerous, because the run has secrets and the PR controls the code. The job therefore checks nothing out and executes nothing from the PR; keep it that way when editing it.
+
+Security alerts are handled in two layers. Dependabot security updates are on in the repository settings, so an alert Dependabot can fix becomes an ordinary Dependabot PR and goes through the above. `dependabot-fix.yml` is the sweep behind that: once a week it counts the alerts still open with no Dependabot PR in flight, and if there are any, Claude reads them and opens one PR titled `chore: resolve Dependabot alerts [DEPENDENCY-MAINTENANCE]` that resolves them. That PR is authored by the PAT, so it is reviewed and armed like any other, and the review is a real check on the change rather than the skipped one above. The sweep touches only what an open alert names: the Arduino core and libraries, the vendored QuickJS-ng and the host build's LVGL tag go out of date without Dependabot noticing, and are left alone on purpose, because each changes what runs on the panel and nothing in CI can see the panel. Most weeks the sweep finds nothing and ends in seconds without reaching the model.
+
 ## Two sharp edges
 
-**Auto-merge does not update the branch.** The ruleset sets `strict_required_status_checks_policy`, meaning a PR must be up to date with `main` before merging. GitHub's auto-merge honours that but will not update the branch for you, so if `main` moves while a PR waits, the PR sits armed and unmerged until you update it. With serial one-at-a-time PRs this never comes up. If it starts happening, the fix is to turn strictness off in the ruleset rather than to add a workflow that pushes merges into branches.
+**Auto-merge does not update the branch.** The ruleset sets `strict_required_status_checks_policy`, meaning a PR must be up to date with `main` before merging. GitHub's auto-merge honours that but will not update the branch for you, so if `main` moves while a PR waits, the PR sits armed and unmerged until you update it. With serial one-at-a-time PRs this never comes up. If it starts happening, the fix is to turn strictness off in the ruleset rather than to add a workflow that pushes merges into branches. Dependabot PRs are the likeliest to hit this, since several can be open at once; Dependabot rebases its own PRs when they conflict, and a comment of `@dependabot rebase` makes it do so when they merely fall behind.
 
 **Arming happens after the review, not alongside it.** This is why `arm-auto-merge` lives inside `claude-review.yml` behind `needs: review` rather than in its own workflow triggered by `ready_for_review`. Marking a PR ready does not change the head SHA, and required checks are evaluated per SHA, so a `review` check left over from the draft phase would still be the current one at that instant. A separate arming workflow firing on the same event would race the review it is supposed to be waiting for, and could arm against a stale result. Making arming a downstream job of the review removes the race by construction: there is no moment at which the merge is armed and the review has not run on that exact commit.
 
@@ -121,7 +142,7 @@ The same reasoning governs the CI wait described in the happy path, and it is wh
 
 That is a security control, and the right one. Without it a pull request could rewrite the review workflow to print `ANTHROPIC_API_KEY` and `PR_AUTOMATION_PAT` into a log, and the review would obligingly run the attacker's edited copy of itself. The workflow reviewing a diff has to be the one `main` already trusts.
 
-The practical effect: a PR touching this file gets no verdict comment, the verdict step fails closed, `review` goes red, and the required check blocks the merge. Drop `review` from the ruleset's required checks, merge, then add it back. Keep such PRs small and separate from functional changes, because the diff genuinely goes unreviewed.
+The practical effect: a PR touching this file gets no verdict comment, the verdict step fails closed, `review` goes red, and the required check blocks the merge. Drop `review` from the ruleset's required checks, merge, then add it back. Keep such PRs small and separate from functional changes, because the diff genuinely goes unreviewed. A Dependabot PR that bumps the action's pin in this file is the one such change that needs none of this: the review does not run on it at all (see [Dependabot PRs](#dependabot-prs)), so the ruleset is satisfied by CI and it merges by the normal button.
 
 **How the refusal actually surfaces is worth knowing, because it is not what it sounds like.** The action does not fail. It emits a warning, logs `Exiting due to workflow validation skip`, and the step **succeeds** (observed in run `30510145596`). So the implicit `success()` guard does not protect anything here: every later step runs, and the verdict step is the only thing standing between a workflow-touching PR and a green check.
 

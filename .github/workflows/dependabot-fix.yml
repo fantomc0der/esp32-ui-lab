@@ -1,0 +1,121 @@
+name: Dependency Maintenance
+
+# The scheduled sweep behind Dependabot. See docs/pr-automation.md.
+#
+# Dependabot security updates are on, so an alert it can fix becomes a
+# Dependabot PR within a day and lands through dependabot-auto-merge.yml.
+# What this run picks up is the remainder: an alert still open with no
+# Dependabot PR against it, which is Dependabot saying it could not produce
+# a fix on its own. Claude reads those alerts and opens one PR that resolves
+# them, authored by the PAT so that claude-review.yml reviews it like any
+# other PR and arms the merge on a PASS.
+#
+# The scope is alerts and only alerts. The things in this repo that go out
+# of date without Dependabot noticing (the Arduino core and libraries, the
+# vendored QuickJS-ng, LVGL for the host build) are deliberately not bumped
+# from here: each changes what runs on the panel, CI cannot see the panel,
+# and a scheduled job has no board (dependabot.yml says the same).
+#
+# Most weeks the status step finds nothing and the run ends in seconds
+# without reaching the model.
+
+on:
+  schedule:
+    - cron: "17 13 * * 3"
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 1
+          # The PAT so the push and the PR this run makes trigger the review
+          # workflow. Pushes and PRs authored by GITHUB_TOKEN do not.
+          token: ${{ secrets.PR_AUTOMATION_PAT }}
+
+      - name: Check open alerts and PRs already in flight
+        id: status
+        env:
+          GH_TOKEN: ${{ secrets.PR_AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          alerts=$(gh api --paginate "repos/$REPO/dependabot/alerts?state=open" --jq 'length' \
+            | awk '{ s += $1 } END { print s + 0 }')
+          # An open Dependabot PR means Dependabot is still working through the
+          # alerts itself; let that land first rather than racing it with a
+          # second PR touching the same pins.
+          dependabot_prs=$(gh pr list --repo "$REPO" --state open --author 'app/dependabot' \
+            --json number --jq 'length')
+          existing=$(gh pr list --repo "$REPO" --state open \
+            --search 'in:title [DEPENDENCY-MAINTENANCE]' --json number --jq 'length')
+          echo "alert_count=$alerts" >> "$GITHUB_OUTPUT"
+          if [ "$alerts" -gt 0 ] && [ "$dependabot_prs" -eq 0 ] && [ "$existing" -eq 0 ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "$alerts open alert(s) with no Dependabot PR in flight. Starting a maintenance run."
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Open alerts: $alerts; open Dependabot PRs: $dependabot_prs; open maintenance PRs: $existing. Nothing to start."
+          fi
+
+      - name: Create maintenance branch
+        if: steps.status.outputs.should_run == 'true'
+        run: |
+          branch="dependency-maintenance/scheduled-${{ github.run_id }}"
+          git checkout -b "$branch"
+          echo "BRANCH=$branch" >> "$GITHUB_ENV"
+
+      # Keep this pin in step with claude-review.yml; the reasoning is recorded there.
+      - name: Resolve the open alerts with Claude
+        if: steps.status.outputs.should_run == 'true'
+        uses: anthropics/claude-code-action@v1.0.248
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.PR_AUTOMATION_PAT }}
+          base_branch: main
+          claude_args: |
+            --model claude-opus-5-5
+            --fallback-model claude-sonnet-5-5
+            --effort xhigh
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(gh:*),Bash(git:*),Bash(node:*),Bash(rg:*),Bash(cat:*),Bash(ls:*),Bash(pwd:*),Bash(head:*),Bash(tail:*)"
+          prompt: |
+            REPO: ${{ github.repository }}
+            BRANCH: ${{ env.BRANCH }}
+            OPEN ALERTS: ${{ steps.status.outputs.alert_count }}
+
+            Perform this repository's scheduled dependency maintenance. Read CLAUDE.md and docs/pr-automation.md first.
+
+            1. Fetch the open security alerts with `gh api --paginate "repos/${{ github.repository }}/dependabot/alerts?state=open"`. Dependabot has already had its turn at these and opened no PR, so each one needs a hand-made fix.
+            2. For each alert, make the smallest change that resolves it. This repository has no package manager: its only Dependabot ecosystem is GitHub Actions, so a fix is normally a version bump of a `uses:` pin in `.github/workflows/`. Keep each pin in the form it already has (a major tag stays a major tag, an exact `vX.Y.Z` stays exact). Read the release notes between the old and new versions before bumping, and say in the PR body what they contained that matters to this repo.
+            3. Do not bump anything that is not the subject of an open alert. In particular leave the Arduino core and library versions, the vendored QuickJS-ng, and the LVGL GIT_TAG in firmware/host-test/CMakeLists.txt exactly as they are; those change what runs on the panel and need a board.
+            4. If an alert can only be resolved by bumping `anthropics/claude-code-action`, bump it in every workflow that pins it and keep the pins identical. Then state in the PR body that a PR touching `claude-review.yml` cannot be reviewed by the action (the action refuses to run on a modified copy of its own workflow), so the review check will go red and a person has to merge it as described in docs/pr-automation.md under "Changing the review workflow itself".
+            5. Do not remove checks, weaken permissions, or add suppressions to make an alert go away. An alert that cannot be fixed safely is explained in the PR body, not hidden.
+            6. Commit the complete change, push `${{ env.BRANCH }}`, and open a pull request against `main` titled `chore: resolve Dependabot alerts [DEPENDENCY-MAINTENANCE]`. Open it ready for review, not as a draft, so the review runs. Prose in the PR body is never hard-wrapped.
+            7. In the PR body, list every alert addressed with its number, package, severity and the change that resolves it, and every alert left open with the reason.
+
+      - name: Require the maintenance pull request
+        if: steps.status.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PR_AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --repo "$REPO" --state open --base main --head "$BRANCH" \
+            --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then
+            echo "::error::Claude completed without opening the maintenance PR from $BRANCH. The alerts are still open; read the run log."
+            exit 1
+          fi
+          # Not armed here. The PR is authored by the PAT, so claude-review.yml
+          # reviews it and its arm-auto-merge job arms the merge on a PASS, the
+          # same as for any other PR.
+          echo "Maintenance PR #$pr is open and will be reviewed like any other."

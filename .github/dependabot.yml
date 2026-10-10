@@ -1,0 +1,46 @@
+# Dependabot is enabled in the repository settings for security alerts and
+# security updates; this file adds scheduled version updates. The only
+# ecosystem it can see here is GitHub Actions. Everything else this repo
+# depends on is outside Dependabot's reach: the Arduino core and libraries
+# are pinned by name in ci.yml, flash.ps1 and BUILDING.md, QuickJS-ng is
+# vendored by tools/vendor-quickjs.ps1, and LVGL for the host build is a
+# GIT_TAG in firmware/host-test/CMakeLists.txt. Those stay manual on
+# purpose: a bump to any of them changes what runs on the panel, and CI
+# cannot see the panel (docs/pr-automation.md).
+#
+# What happens to the PRs this opens is in dependabot-auto-merge.yml.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:37"
+      timezone: America/New_York
+    open-pull-requests-limit: 10
+    groups:
+      # One PR per week for every minor and patch bump, so a routine Monday
+      # is one auto-merged PR rather than four. Majors arrive one per action,
+      # outside the group, and are never auto-merged.
+      actions-non-major:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - anthropics/claude-code-action
+        update-types:
+          - minor
+          - patch
+      # Kept out of the group so its bump is always a PR of its own. The
+      # review workflow depends on this action's exact behaviour (the sticky
+      # comment header its verdict step scrapes, the inputs it accepts) and
+      # on a Dependabot PR nothing exercises the new version before merge,
+      # because the review job does not run for Dependabot. So the auto-merge
+      # workflow refuses this one and a person reads the release notes and
+      # clicks merge, which is the policy claude-review.yml records at its pin.
+      claude-code-action:
+        patterns:
+          - anthropics/claude-code-action
+    commit-message:
+      prefix: ci

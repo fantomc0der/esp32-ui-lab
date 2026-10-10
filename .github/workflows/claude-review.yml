@@ -35,6 +35,16 @@ jobs:
   review:
     # Named to sit alongside `scripts` and `firmware` in the ruleset's required checks.
     name: review
+    # The one job-level skip in this file, and the one place where "skipped
+    # satisfies a required check" is the intended effect rather than the trap the
+    # steps below exist to avoid. A run that Dependabot triggers is given a
+    # read-only GITHUB_TOKEN and no Actions secrets, so this job would fail at the
+    # API key on every Dependabot PR and hold every one of them shut. Skipping
+    # leaves a Dependabot PR gated by CI alone, and dependabot-auto-merge.yml
+    # decides which of them may then land on their own. The actor rather than the
+    # PR author: a person pushing to a Dependabot branch is the actor for that
+    # push, gets the secrets, and so gets reviewed.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -146,14 +156,18 @@ jobs:
       # failing takes the merge gate down with it, and this action has shipped at
       # least one release that broke on a whole class of repo layout (v1.0.89
       # crashed on any repo where CLAUDE.md or .claude/ is a git symlink, and
-      # stayed broken for weeks). Bumping is a deliberate one-line change: read
-      # the release notes, then move this pin.
+      # stayed broken for weeks). Bumping is a deliberate change: read the release
+      # notes, check the verdict step below still matches the sticky comment's
+      # header, then move this pin and the two copies of it in claude-fix.yml and
+      # dependabot-fix.yml together. Dependabot opens the PR for it (one of its
+      # own, outside the weekly group) and dependabot-auto-merge.yml refuses to
+      # arm that PR, so the merge is the deliberate step.
       #
       # That particular bug cannot bite here, because this repo has no symlinks at
       # all (`git ls-files -s | grep 120000` is empty). Worth keeping that way:
       # it is also why .claude/skills/ holds real files rather than a symlink
       # pointing somewhere else in the tree.
-      - uses: anthropics/claude-code-action@v1.0.183
+      - uses: anthropics/claude-code-action@v1.0.248
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           base_branch: ${{ github.event.pull_request.base.ref }}
@@ -205,8 +219,16 @@ jobs:
             Be strict about defects. If you found a bug, an invariant violation, a test that cannot fail for its stated reason, or a behaviour change to the binding layer with no corresponding selftest case, vote FAIL. When genuinely torn on a firmware change, vote FAIL: nothing here ships to users, a wrong FAIL costs one more push, and a wrong PASS merges code no test on this runner can catch.
 
             Strict is not the same as withholding. If every blocking finding is resolved and what remains is non-blocking, vote PASS and keep the remarks — a PASS is not an endorsement of every line, and holding the gate shut over wording is how a review stops being useful. The verdict answers one question: is anything here wrong in a way that matters?
+          # The model is pinned for the same reason the action is: what reviews
+          # this repo changes by a deliberate one-line diff, not under the gate
+          # between two runs. The review is read-only, so the editing tools are
+          # denied outright rather than merely left off the allow list.
           claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --model claude-opus-5-5
+            --fallback-model claude-sonnet-5-5
+            --effort xhigh
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --disallowedTools "Edit,Write,NotebookEdit"
 
       # The action updates a sticky comment in place, so a FAIL verdict is otherwise
       # invisible to the merge gate — the check would go green simply because the

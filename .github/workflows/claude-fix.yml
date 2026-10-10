@@ -1,15 +1,18 @@
 name: Claude PR Fix
 
 # On-demand, and the only piece of this automation a human triggers directly:
-# comment `@claude <what to change>` on a PR and Claude pushes the change to the
-# branch. The push is authored by the PAT, so it fires `synchronize`, which
-# re-runs both ci.yml and the review — the fix is re-gated like any other commit.
+# comment `@claude <what to change>` on a PR, in a review comment, or in the
+# body of a submitted review, and Claude pushes the change to the branch. The
+# push is authored by the PAT, so it fires `synchronize`, which re-runs both
+# ci.yml and the review — the fix is re-gated like any other commit.
 
 on:
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
+  pull_request_review:
+    types: [submitted]
 
 # Two `@claude` comments in quick succession would otherwise start two runs that
 # check out the same branch and both try to push to it, where the loser fails on a
@@ -22,19 +25,42 @@ concurrency:
 
 jobs:
   fix:
-    # Only PR comments containing @claude, and never a comment written by a bot.
-    # The bot exclusion is the loop guard: the review posts its sticky comment as
-    # github-actions[bot], and without this a review that happened to quote
-    # "@claude" would trigger a fix, whose push would trigger another review.
+    # Three conditions, each load-bearing on a public repository.
+    #
+    # The author has to be the owner, a member or a collaborator. Anyone with a
+    # GitHub account can comment on an open PR here, and without this, anyone
+    # could write `@claude` and start a paid run that pushes to the branch with
+    # the PAT. A comment from someone else is simply a comment.
+    #
+    # Never a comment written by a bot. This is the loop guard: the review posts
+    # its sticky comment as a bot, and without this a review that happened to
+    # quote "@claude" would trigger a fix, whose push would trigger another review.
+    #
+    # And only on a PR, with `@claude` in the body. An issue comment that is not
+    # on a PR has no branch to push to.
     if: |
-      github.event.comment.user.type != 'Bot' &&
-      ((github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@claude')))
+      (
+        (github.event_name == 'pull_request_review_comment' || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null)) &&
+        github.event.comment.user.type != 'Bot' &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+        contains(github.event.comment.body, '@claude')
+      ) || (
+        github.event_name == 'pull_request_review' &&
+        github.event.review.user.type != 'Bot' &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association) &&
+        contains(github.event.review.body, '@claude')
+      )
     runs-on: ubuntu-latest
+    # A bound so a run that loses the model mid-turn ends as a red job after an
+    # hour instead of holding the concurrency group, and every later `@claude`,
+    # until the 6h default.
+    timeout-minutes: 60
     permissions:
       contents: write
       pull-requests: write
       id-token: write
+      # So Claude can read the failed CI job's log when asked to fix a red build.
+      actions: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -43,8 +69,18 @@ jobs:
           # review workflow. A push authored by GITHUB_TOKEN does not.
           token: ${{ secrets.PR_AUTOMATION_PAT }}
       # Keep this pin in step with claude-review.yml; the reasoning is recorded there.
-      - uses: anthropics/claude-code-action@v1.0.183
+      - uses: anthropics/claude-code-action@v1.0.248
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.PR_AUTOMATION_PAT }}
-          base_branch: ${{ github.event.pull_request.base.ref }}
+          # A literal rather than the PR's base ref, because an issue_comment
+          # event carries no pull_request object and the expression came out
+          # empty on the most common trigger. Every PR here targets main.
+          base_branch: main
+          # The model is pinned for the same reason the action is: a change in
+          # what reviews and fixes this repo should be a deliberate one-line diff,
+          # not something that moves under the workflows between two runs.
+          claude_args: |
+            --model claude-opus-5-5
+            --fallback-model claude-sonnet-5-5
+            --effort xhigh

@@ -1,0 +1,95 @@
+name: Dependabot Auto-Merge
+
+# The Dependabot half of the PR automation. See docs/pr-automation.md.
+#
+# A Dependabot PR cannot go through claude-review.yml: a workflow run that
+# Dependabot triggers is handed a read-only GITHUB_TOKEN and none of the
+# repository's Actions secrets, so the review would fail at the API key on
+# every one of them and hold every one of them shut. The review job therefore
+# skips itself for Dependabot, and this workflow decides what happens instead.
+#
+# What it does is small on purpose, and the same as `arm-auto-merge` in the
+# review workflow: it flips GitHub's own auto-merge switch for the updates
+# that are safe to land on a green build, and nothing else. GitHub still
+# merges only once the ruleset on main is satisfied, which for a Dependabot
+# PR means `scripts`, `firmware` and `host-test` green on the head SHA and the
+# branch up to date with main. Nothing here reads a check run.
+#
+# pull_request_target rather than pull_request, because that is the event
+# that runs with the base branch's secrets even when Dependabot is the actor,
+# and this job needs the PAT to arm the merge (a merge performed as
+# github-actions[bot] would not run ci.yml on main). It is also the event
+# that makes checking out the PR head dangerous, so this job checks nothing
+# out and runs nothing from the PR. Keep it that way.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+jobs:
+  auto-merge:
+    name: dependabot auto-merge
+    # The actor, not the PR author. A person who pushes a fix to a Dependabot
+    # branch is the actor for that push, so this skips and claude-review.yml
+    # runs instead, with the secrets a human-triggered run is given. The two
+    # conditions are the same expression negated, so exactly one of the two
+    # workflows takes any given push.
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Read Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Majors stay open for a person. So does anthropics/claude-code-action
+      # at any size of bump: the review workflow depends on that action's
+      # exact behaviour (the sticky comment header its verdict step scrapes),
+      # the review does not run on a Dependabot PR, and so nothing exercises
+      # the new version before it lands. dependabot.yml keeps it out of the
+      # weekly group so the refusal here holds nothing else back. A person
+      # reads the release notes and clicks merge; the ruleset is satisfied by
+      # CI alone on a Dependabot PR, so no bypass is needed.
+      - name: Decide whether this update may land on its own
+        id: decide
+        env:
+          TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEPS: ${{ steps.metadata.outputs.dependency-names }}
+        run: |
+          set -euo pipefail
+          arm=false
+          case "$TYPE" in
+            version-update:semver-patch|version-update:semver-minor) arm=true ;;
+          esac
+          case "$DEPS" in
+            *anthropics/claude-code-action*) arm=false ;;
+          esac
+          echo "arm=$arm" >> "$GITHUB_OUTPUT"
+          if [ "$arm" = true ]; then
+            echo "$TYPE of $DEPS: arming auto-merge."
+          else
+            echo "$TYPE of $DEPS: not armed, a person reads the release notes and merges."
+          fi
+
+      - name: Arm auto-merge
+        if: steps.decide.outputs.arm == 'true'
+        env:
+          # The PAT for the same reason as in claude-review.yml: GitHub performs
+          # the merge later as whoever armed it, and a push to main authored by
+          # github-actions[bot] does not trigger workflows.
+          GH_TOKEN: ${{ secrets.PR_AUTOMATION_PAT }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          armed=$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest // empty')
+          if [ -n "$armed" ]; then
+            echo "Auto-merge is already enabled on this PR; nothing to do."
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "$REPO" --squash --auto
+          echo "Auto-merge armed. GitHub will squash once the ruleset on main is satisfied."

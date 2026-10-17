@@ -70,6 +70,11 @@ jobs:
           token: ${{ secrets.PR_AUTOMATION_PAT }}
       # Keep this pin in step with claude-review.yml; the reasoning is recorded there.
       - uses: anthropics/claude-code-action@v1.0.248
+        env:
+          # Headless runs end when the main conversation stops, so work handed
+          # to background subagents or commands is never reported back. See
+          # claude-review.yml.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.PR_AUTOMATION_PAT }}

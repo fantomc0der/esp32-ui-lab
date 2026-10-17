@@ -167,7 +167,16 @@ jobs:
       # all (`git ls-files -s | grep 120000` is empty). Worth keeping that way:
       # it is also why .claude/skills/ holds real files rather than a symlink
       # pointing somewhere else in the tree.
-      - uses: anthropics/claude-code-action@v1.0.248
+      - id: claude
+        uses: anthropics/claude-code-action@v1.0.248
+        env:
+          # Headless runs end when the main conversation stops. A review that
+          # hands its work to background subagents or background commands and
+          # stops to wait for them never resumes, so the sticky comment keeps
+          # its todo list and no verdict is written. Keep every subagent and
+          # command in the foreground so the conversation only stops once the
+          # review is posted.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           base_branch: ${{ github.event.pull_request.base.ref }}
@@ -180,6 +189,8 @@ jobs:
             PR NUMBER: ${{ github.event.pull_request.number }}
 
             Review this pull request. Read CLAUDE.md first — it records invariants that are not obvious from the diff, and most real defects in this repo are violations of one of them.
+
+            This conversation ends the moment you stop, and nothing resumes it. Do the whole review here: do not invoke the /code-review skill, and do not start subagents or commands in the background and stop to wait for them. The summary comment, verdict line included, must be posted before you stop.
 
             The single most important thing to understand about this repo: CI cannot run the real functional test. `app/selftest.js` and `app/ui-selftest.js` execute on the physical ESP32-S3 panel and report over serial, so a hosted runner never runs them. CI proves that every board compiles, that scripts parse, and that scripts only call bindings the C layer registers. It proves nothing about runtime behaviour on the device. Weight your review accordingly: a change under `firmware/` is largely unverified by the checks that are about to go green, so scrutinise it far harder than a change under `tools/`.
 
@@ -229,6 +240,17 @@ jobs:
             --effort xhigh
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
             --disallowedTools "Edit,Write,NotebookEdit"
+
+      # The action hides Claude's messages from the job log, so a review that
+      # stops without a verdict leaves nothing to diagnose. The transcript holds
+      # only this public repository's content and the review's reasoning.
+      - if: always() && steps.claude.outputs.execution_file != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: claude-review-transcript-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: ${{ steps.claude.outputs.execution_file }}
+          retention-days: 3
+          if-no-files-found: ignore
 
       # The action updates a sticky comment in place, so a FAIL verdict is otherwise
       # invisible to the merge gate — the check would go green simply because the
